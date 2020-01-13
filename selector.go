@@ -21,7 +21,7 @@ func selectProject() (string, error) {
 		return "", err
 	}
 
-	return "~/dev/" + selected, nil
+	return selected, nil
 }
 
 func selectWorkspace() (string, workspace, workspace, error) {
@@ -60,7 +60,7 @@ func selectWorkspace() (string, workspace, workspace, error) {
 
 func rofiSelect(in io.Reader) (string, error) {
 	out := &bytes.Buffer{}
-	cmd := exec.Command("rofi", "-dmenu")
+	cmd := exec.Command("rofi", "-dmenu", "-sort", "-matching", "fuzzy")
 	cmd.Stdin = in
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = out

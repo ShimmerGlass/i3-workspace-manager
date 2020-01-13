@@ -8,11 +8,6 @@ import (
 	"strings"
 )
 
-const (
-	leftDisplay  = "DP-5"
-	rightDisplay = "DP-4"
-)
-
 type workspace struct {
 	Num    int    `json:"num,omitempty"`
 	Name   string `json:"name,omitempty"`
@@ -39,7 +34,7 @@ func workspaces() ([]workspace, error) {
 	return res, nil
 }
 
-func workspaceForProject(project string) (workspace, workspace, bool, error) {
+func workspaceForProject(project, leftDisplay, rightDisplay string) (workspace, workspace, bool, error) {
 	wks, err := workspaces()
 	if err != nil {
 		return workspace{}, workspace{}, false, err
@@ -63,7 +58,7 @@ func workspaceForProject(project string) (workspace, workspace, bool, error) {
 	return left, right, leftOk && rightOk, nil
 }
 
-func nextWorkspaces() (int, int, error) {
+func nextWorkspaces(leftDisplay, rightDisplay string) (int, int, error) {
 	wks, err := workspaces()
 	if err != nil {
 		return 0, 0, err
