@@ -39,7 +39,7 @@ func workspaces() ([]workspace, error) {
 	return res, nil
 }
 
-func (m *Manager) workspaceForProject(project) (workspace, workspace, bool, error) {
+func (m *Manager) workspaceForProject(project string) (workspace, workspace, bool, error) {
 	wks, err := workspaces()
 	if err != nil {
 		return workspace{}, workspace{}, false, err
@@ -50,10 +50,10 @@ func (m *Manager) workspaceForProject(project) (workspace, workspace, bool, erro
 	for _, w := range wks {
 		if strings.HasSuffix(w.Name, project) {
 			switch w.Output {
-			case leftDisplay:
+			case m.leftDisplay:
 				left = w
 				leftOk = true
-			case rightDisplay:
+			case m.rightDisplay:
 				right = w
 				rightOk = true
 			}
@@ -63,7 +63,7 @@ func (m *Manager) workspaceForProject(project) (workspace, workspace, bool, erro
 	return left, right, leftOk && rightOk, nil
 }
 
-func nextWorkspaces(leftDisplay, rightDisplay string) (int, int, error) {
+func (m *Manager) nextWorkspaces(leftDisplay, rightDisplay string) (int, int, error) {
 	wks, err := workspaces()
 	if err != nil {
 		return 0, 0, err
@@ -84,7 +84,7 @@ func nextWorkspaces(leftDisplay, rightDisplay string) (int, int, error) {
 	return left, right, nil
 }
 
-func currentProject() (string, error) {
+func (m *Manager) currentProject() (string, error) {
 	cmd := exec.Command("i3-msg", "-t", "get_workspaces")
 	err := cmd.Start()
 	if err != nil {
