@@ -5,9 +5,14 @@ import (
 	"fmt"
 	"log"
 	"path"
-	"strings"
 	"time"
 )
+
+type Manager struct {
+	leftDisplay  string
+	rightDisplay string
+	projectDir   string
+}
 
 func main() {
 	projectDirectory := flag.String("project-dir", "", "")
@@ -47,23 +52,44 @@ func main() {
 		i3Name = projectName(selected)
 	}
 
-	leftWks, rightWks, ok, err := workspaceForProject(i3Name, *leftDisplay, *rightDisplay)
+}
+
+func goBack() error {
+	hist, err := getHistory()
+	if err != nil {
+		return err
+	}
+
+	current, err := currentProject()
+	if err != nil {
+
+	}
+	for i := len(hist) - 1; i >= 0; i-- {
+		if hist[i] == current {
+			continue
+		}
+
+	}
+}
+
+func (m *Manager) openProject(project string) error {
+	leftWks, rightWks, ok, err := workspaceForProject(project, leftDisplay, rightDisplay)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if ok {
-		err := switchToWorkSpace(i3Name, leftWks, rightWks)
+		err := switchToWorkSpace(project, leftWks, rightWks)
 		if err != nil {
 			log.Fatal(err)
 		}
-		return
+		return nil
 	} else if project != "" {
 		path := path.Join(*projectDirectory, project)
 		err = ensureProject(path, project)
 		if err != nil {
 			log.Fatal(err)
 		}
-		err = openNew(path, project, i3Name, *leftDisplay, *rightDisplay)
+		err = openNew(path, project, i3Name, leftDisplay, rightDisplay)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -71,7 +97,7 @@ func main() {
 }
 
 func switchToWorkSpace(name string, left, right workspace) error {
-	setLast(name)
+	addToHistory(name)
 	return i3Cmd(
 		fmt.Sprintf("workspace %s", left.Name),
 		fmt.Sprintf("workspace %s", right.Name),
@@ -84,7 +110,7 @@ func openNew(path, project, i3Name, leftDisplay, rightDisplay string) error {
 	if err != nil {
 		return err
 	}
-	setLast(project)
+	addToHistory(project)
 
 	err = i3Cmd(
 		fmt.Sprintf("workspace %d", leftWks),
@@ -106,10 +132,4 @@ func openNew(path, project, i3Name, leftDisplay, rightDisplay string) error {
 	cmd("zsh", "-c", fmt.Sprintf("source ~/.zshrc; code %s", path))
 
 	return nil
-}
-
-func projectName(path string) string {
-	parts := strings.Split(path, "/")
-	name := parts[len(parts)-1]
-	return name
 }
