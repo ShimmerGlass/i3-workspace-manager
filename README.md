@@ -4,6 +4,8 @@ When working on a lot of projects at one managing workspaces and windows can bec
 *i3-workspace-manager* is a way to automatically open a text editor and a terminal from a project list and switch between them.
 It takes a command to list your projects, and a list of command to run on your displays to open it.
 
+![demo](https://raw.githubusercontent.com/shimmerglass/i3-workspace-manager/master/docs/rec.gif)
+
 The following commands are available :
 
 | Command         | Description                                          |
