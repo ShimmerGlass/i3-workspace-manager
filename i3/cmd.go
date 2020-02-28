@@ -1,17 +1,25 @@
 package i3
 
 import (
-	"os"
+	"bytes"
+	"fmt"
 	"os/exec"
 	"strings"
 )
 
 func cmd(bin string, args ...string) error {
 	cmd := exec.Command(bin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	out := &bytes.Buffer{}
+	cmd.Stdout = out
+	cmd.Stderr = out
 
-	return cmd.Run()
+	err := cmd.Run()
+	if err != nil && out.Len() > 0 {
+		return fmt.Errorf("error running %s %v: %s: %s", bin, args, err, out.String())
+	} else if err != nil {
+		return fmt.Errorf("error running %s %v: %s", bin, args, err)
+	}
+	return nil
 }
 
 func Exec(s ...string) error {

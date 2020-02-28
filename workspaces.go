@@ -29,12 +29,12 @@ func (m *Manager) ProjectWks(project string) ([]*i3.Workspace, error) {
 	res := make([]*i3.Workspace, len(m.Workspaces))
 
 	for _, w := range wks {
-		wkProject, ok := workspaceProject(w)
-		if !ok {
-			continue
-		}
-
 		func(w i3.Workspace) {
+			wkProject, ok := workspaceProject(w)
+			if !ok {
+				return
+			}
+
 			if wkProject == project {
 				for i, cw := range m.Workspaces {
 					if cw.Display == w.Output {
@@ -112,21 +112,19 @@ func (m *Manager) OpenProjects() ([]string, error) {
 
 	return projects, nil
 }
-func (m *Manager) nextWorkspacesID(i int) (int, error) {
+func (m *Manager) nextWorkspacesID() (int, error) {
 	wks, err := i3.Workspaces()
 	if err != nil {
 		return 0, err
 	}
 
-	n := workspaceStart + i
+	n := workspaceStart
 	for _, w := range wks {
 		_, ok := workspaceProject(w)
 		if !ok {
 			continue
 		}
-		if w.Output == m.Workspaces[i].Display {
-			n = w.Num + 1
-		}
+		n = w.Num + 1
 	}
 
 	return n, nil

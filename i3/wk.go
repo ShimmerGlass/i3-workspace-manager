@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 )
 
@@ -20,11 +19,13 @@ func Workspaces() ([]Workspace, error) {
 	out := &bytes.Buffer{}
 	cmd := exec.Command("i3-msg", "-t", "get_workspaces")
 	cmd.Stdout = out
-	cmd.Stderr = os.Stderr
+	cmd.Stderr = out
 
 	err := cmd.Run()
-	if err != nil {
-		return nil, err
+	if err != nil && out.Len() > 0 {
+		return nil, fmt.Errorf("error getting workspaces: %s: %s", err, out.String())
+	} else if err != nil {
+		return nil, fmt.Errorf("error getting workspaces: %s", err)
 	}
 
 	res := []Workspace{}
@@ -36,12 +37,42 @@ func Workspaces() ([]Workspace, error) {
 	return res, nil
 }
 
+func WorkspaceByNum(i int) (*Workspace, error) {
+	wks, err := Workspaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, w := range wks {
+		if w.Num == i {
+			return &w, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func WorkspaceByName(n string) (*Workspace, error) {
+	wks, err := Workspaces()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, w := range wks {
+		if w.Name == n {
+			return &w, nil
+		}
+	}
+
+	return nil, nil
+}
+
 func SwitchToWorkspace(name string) error {
 	return Exec(fmt.Sprintf("workspace %s", name))
 }
 
 func CloseWorkspace(num int) error {
-	return Exec(fmt.Sprintf("[workspace=^%d:] kill", num))
+	return Exec(fmt.Sprintf("[workspace=^%d] kill", num))
 }
 
 func RenameWorkspace(num int, title string) error {
