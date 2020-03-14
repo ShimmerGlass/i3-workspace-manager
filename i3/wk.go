@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+
+	i3 "go.i3wm.org/i3/v4"
 )
 
 type Workspace struct {
@@ -79,4 +81,16 @@ func RenameWorkspace(num int, title string) error {
 	return Exec(
 		fmt.Sprintf("rename workspace %d to \"%s\"", num, title),
 	)
+}
+
+func WorkspaceHasWindows(name string) bool {
+	tree, _ := i3.GetTree()
+	wk := tree.Root.FindChild(func(n *i3.Node) bool {
+		return n.Type == i3.WorkspaceNode && n.Name == name
+	})
+
+	return wk.FindChild(func(n *i3.Node) bool {
+		return n.Type == i3.Con && n.Name != ""
+	}) != nil
+
 }

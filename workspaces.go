@@ -97,6 +97,10 @@ func (m *Manager) OpenProjects() ([]string, error) {
 	}
 
 	for _, w := range wks {
+		if !i3.WorkspaceHasWindows(w.Name) {
+			continue
+		}
+
 		project, ok := workspaceProject(w)
 		if ok {
 			pmap[project] = true
@@ -120,6 +124,10 @@ func (m *Manager) nextWorkspacesID() (int, error) {
 
 	n := workspaceStart
 	for _, w := range wks {
+		if !i3.WorkspaceHasWindows(w.Name) {
+			return n, nil
+		}
+
 		_, ok := workspaceProject(w)
 		if !ok {
 			continue
