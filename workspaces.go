@@ -116,13 +116,16 @@ func (m *Manager) OpenProjects() ([]string, error) {
 
 	return projects, nil
 }
+
+var minWorkspace = workspaceStart
+
 func (m *Manager) nextWorkspacesID() (int, error) {
 	wks, err := i3.Workspaces()
 	if err != nil {
 		return 0, err
 	}
 
-	n := workspaceStart
+	n := minWorkspace
 	for _, w := range wks {
 		if !i3.WorkspaceHasWindows(w.Name) {
 			return n, nil
@@ -134,6 +137,8 @@ func (m *Manager) nextWorkspacesID() (int, error) {
 		}
 		n = w.Num + 1
 	}
+
+	minWorkspace = n + 1
 
 	return n, nil
 }
