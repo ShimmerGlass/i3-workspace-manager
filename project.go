@@ -3,15 +3,18 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
-	"strconv"
+	"time"
 
 	"github.com/shimmerglass/i3-workspace-manager/i3"
 	"github.com/shimmerglass/i3-workspace-manager/sel"
 )
 
 func (m *Manager) OpenProject(project string) error {
+	log.Printf("opening project %s", project)
+
 	wks, err := m.ProjectWks(project)
 	if err != nil {
 		return err

@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/syslog"
+	"os"
 	"strings"
 
 	"github.com/gen2brain/beeep"
@@ -38,6 +40,11 @@ func parseWorkspaces(flags arrayFlags) []Workspace {
 }
 
 func main() {
+	logwriter, e := syslog.New(syslog.LOG_NOTICE, os.Args[0])
+	if e == nil {
+		log.SetOutput(logwriter)
+	}
+
 	setupCommand := flag.String("setup-cmd", "", "Setup command for project")
 	listCommand := flag.String("list-cmd", "", "Setup command for listing project")
 	var workspaces arrayFlags

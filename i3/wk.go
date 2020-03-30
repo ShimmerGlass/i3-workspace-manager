@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 
 	i3 "go.i3wm.org/i3/v4"
@@ -70,14 +71,17 @@ func WorkspaceByName(n string) (*Workspace, error) {
 }
 
 func SwitchToWorkspace(name string) error {
+	log.Printf("switching to workspace %s", name)
 	return Exec(fmt.Sprintf("workspace %s", name))
 }
 
 func CloseWorkspace(num int) error {
+	log.Printf("closing to workspace %d", num)
 	return Exec(fmt.Sprintf("[workspace=^%d] kill", num))
 }
 
 func RenameWorkspace(num int, title string) error {
+	log.Printf("renaming workspace %d to %s", num, title)
 	return Exec(
 		fmt.Sprintf("rename workspace %d to \"%s\"", num, title),
 	)
