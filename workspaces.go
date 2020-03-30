@@ -128,17 +128,36 @@ func (m *Manager) nextWorkspacesID() (int, error) {
 	n := minWorkspace
 	for _, w := range wks {
 		if !i3.WorkspaceHasWindows(w.Name) {
-			return n, nil
+			continue
 		}
 
 		_, ok := workspaceProject(w)
 		if !ok {
 			continue
 		}
-		n = w.Num + 1
+
+		if w.Num > n {
+			n = w.Num
+		}
 	}
 
-	minWorkspace = n + 1
+	n++
+
+	minWorkspace = n
 
 	return n, nil
+}
+
+func (m *Manager) displayActiveWorkspace(display string) (string, error) {
+	allWks, err := i3.Workspaces()
+	if err != nil {
+		return "", err
+	}
+	for _, w := range allWks {
+		if w.Visible && w.Output == display {
+			return w.Name, nil
+		}
+	}
+
+	return "", nil
 }

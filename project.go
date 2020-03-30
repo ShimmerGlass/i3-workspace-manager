@@ -33,36 +33,43 @@ func (m *Manager) OpenProject(project string) error {
 					return err
 				}
 			}
-			if w.Output != m.Workspaces[i].Display {
-				err = i3.Exec(fmt.Sprintf("move workspace to output %s", m.Workspaces[i].Display))
-				if err != nil {
-					return err
-				}
-			}
 		} else {
 			wkn, err := m.nextWorkspacesID()
 			if err != nil {
 				return err
 			}
 
-			name := fmt.Sprintf("%d: %s", wkn, project)
-			wk, err := i3.WorkspaceByName(name)
+			displayActiveWorkspace, err := m.displayActiveWorkspace(m.Workspaces[i].Display)
 			if err != nil {
 				return err
 			}
-			if wk != nil {
-				err := i3.CloseWorkspace(wk.Num)
+
+			if displayActiveWorkspace != "" {
+				err = i3.SwitchToWorkspace(displayActiveWorkspace)
 				if err != nil {
 					return err
 				}
+
+				time.Sleep(100 * time.Millisecond)
 			}
 
-			err = i3.SwitchToWorkspace(strconv.Itoa(wkn))
+			name := fmt.Sprintf("%d: %s", wkn, project)
+
+			err = i3.SwitchToWorkspace(name)
 			if err != nil {
 				return err
 			}
 
-			i3.RenameWorkspace(wkn, name)
+			time.Sleep(100 * time.Millisecond)
+
+			if displayActiveWorkspace == "" {
+				err = i3.Exec(fmt.Sprintf("move workspace to output %s", m.Workspaces[i].Display))
+				if err != nil {
+					return err
+				}
+
+				time.Sleep(100 * time.Millisecond)
+			}
 
 			cmd := exec.Command("/bin/sh", "-c", m.Workspaces[i].Command)
 			env := os.Environ()
@@ -79,10 +86,8 @@ func (m *Manager) OpenProject(project string) error {
 				return fmt.Errorf("error setting up workspace: %s", err)
 			}
 
-			err = i3.Exec(fmt.Sprintf("move workspace to output %s", m.Workspaces[i].Display))
-			if err != nil {
-				return err
-			}
+			time.Sleep(100 * time.Millisecond)
+
 		}
 	}
 
