@@ -27,6 +27,10 @@ func Index() (int, error) {
 		return 0, err
 	}
 
+	if len(l) == 0 {
+		return 0, nil
+	}
+
 	return strconv.Atoi(string(l))
 }
 
