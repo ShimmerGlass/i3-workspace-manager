@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 
 	"github.com/shimmerglass/i3-workspace-manager/i3"
@@ -25,6 +26,8 @@ func (m *Manager) OpenProject(project string) error {
 		return err
 	}
 
+	cmdErrs := make([]error, len(wks))
+	var wg sync.WaitGroup
 	for i, w := range wks {
 		if w != nil {
 			if !w.Visible {
@@ -71,24 +74,40 @@ func (m *Manager) OpenProject(project string) error {
 				time.Sleep(100 * time.Millisecond)
 			}
 
-			cmd := exec.Command("/bin/sh", "-c", m.Workspaces[i].Command)
-			env := os.Environ()
-			out := &bytes.Buffer{}
-			cmd.Stderr = out
-			cmd.Stdout = out
-			env = append(env, fmt.Sprintf("PROJECT_NAME=%s", project))
-			cmd.Env = env
-			err = cmd.Run()
-			if err != nil {
-				if out.Len() > 0 {
-					return fmt.Errorf("error opening workspace with command %s: %s", m.Workspaces[i].Command, out.String())
-				}
-				return fmt.Errorf("error setting up workspace: %s", err)
-			}
+			wg.Add(1)
+			go func(i int, cmd string) {
+				cmdErrs[i] = m.runOpenCommand(project, cmd)
+				wg.Done()
+			}(i, m.Workspaces[i].Command)
 
-			time.Sleep(100 * time.Millisecond)
-
+			time.Sleep(time.Second)
 		}
+	}
+
+	wg.Wait()
+	for _, err := range cmdErrs {
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *Manager) runOpenCommand(project, command string) error {
+	cmd := exec.Command("/bin/sh", "-c", command)
+	env := os.Environ()
+	out := &bytes.Buffer{}
+	cmd.Stderr = out
+	cmd.Stdout = out
+	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", project))
+	cmd.Env = env
+	err := cmd.Run()
+	if err != nil {
+		if out.Len() > 0 {
+			return fmt.Errorf("error opening workspace with command %s: %s", command, out.String())
+		}
+		return fmt.Errorf("error setting up workspace: %s", err)
 	}
 
 	return nil
