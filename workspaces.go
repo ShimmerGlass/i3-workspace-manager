@@ -178,15 +178,13 @@ func (m *Manager) nextWorkspacesID() (int64, error) {
 		usedNums[w.Num] = true
 	}
 
-	for n := minWorkspace; true; n++ {
+	for n := minWorkspace; ; n++ {
 		if usedNums[n] {
 			continue
 		}
 		minWorkspace = n + 1
 		return n, nil
 	}
-
-	return 0, nil
 }
 
 func (m *Manager) displayActiveWorkspace(display string) (string, error) {
