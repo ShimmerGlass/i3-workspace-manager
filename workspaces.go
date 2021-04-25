@@ -20,32 +20,30 @@ func workspaceProject(wk i3.Workspace) (string, bool) {
 	return parts[1], true
 }
 
-func (m *Manager) ProjectWks(project string) ([]*i3.Workspace, error) {
+func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error) {
 	wks, err := i3.Workspaces()
 	if err != nil {
-		return nil, err
+		return i3.Workspace{}, false, err
 	}
-
-	res := make([]*i3.Workspace, len(m.Workspaces))
 
 	for _, w := range wks {
-		func(w i3.Workspace) {
-			wkProject, ok := workspaceProject(w)
-			if !ok {
-				return
-			}
+		wkProject, ok := workspaceProject(w)
+		if !ok {
+			continue
+		}
 
-			if wkProject == project {
-				for i, cw := range m.Workspaces {
-					if cw.Display == w.Output {
-						res[i] = &w
-					}
-				}
-			}
-		}(w)
+		if wkProject != project {
+			continue
+		}
+
+		if w.Output != display {
+			continue
+		}
+
+		return w, true, nil
 	}
 
-	return res, nil
+	return i3.Workspace{}, false, nil
 }
 
 func (m *Manager) CurrentProject() (string, bool, error) {
@@ -117,9 +115,9 @@ func (m *Manager) OpenProjects() ([]string, error) {
 	return projects, nil
 }
 
-var minWorkspace = workspaceStart
+var minWorkspace = int64(workspaceStart)
 
-func (m *Manager) nextWorkspacesID() (int, error) {
+func (m *Manager) nextWorkspacesID() (int64, error) {
 	wks, err := i3.Workspaces()
 	if err != nil {
 		return 0, err

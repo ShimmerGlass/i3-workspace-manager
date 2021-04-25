@@ -172,19 +172,33 @@ func (m *Manager) ActionClose() error {
 		return nil
 	}
 
-	wks, err := m.ProjectWks(project)
+	workspaces, err := i3.Workspaces()
 	if err != nil {
 		return err
 	}
 
-	for _, wk := range wks {
+	clean := true
+	for _, wk := range workspaces {
+		p, ok := workspaceProject(wk)
+		if !ok || p != project {
+			continue
+		}
+
 		err := i3.CloseWorkspace(wk.Num)
 		if err != nil {
 			return err
 		}
+
+		if i3.WorkspaceHasWindows(wk.Name) {
+			clean = false
+		}
 	}
 
-	beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
+	if clean {
+		beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
+	} else {
+		beeep.Notify("i3wks", fmt.Sprintf("Some windows could not be closed closing project %s", project), "")
+	}
 
 	return nil
 }

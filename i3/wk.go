@@ -1,46 +1,19 @@
 package i3
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os/exec"
 
 	i3 "go.i3wm.org/i3/v4"
 )
 
-type Workspace struct {
-	Num     int    `json:"num,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Output  string `json:"output,omitempty"`
-	Visible bool   `json:"visible,omitempty"`
-	Focused bool   `json:"focused,omitempty"`
-}
+type Workspace = i3.Workspace
 
 func Workspaces() ([]Workspace, error) {
-	out := &bytes.Buffer{}
-	cmd := exec.Command("i3-msg", "-t", "get_workspaces")
-	cmd.Stdout = out
-	cmd.Stderr = out
-
-	err := cmd.Run()
-	if err != nil && out.Len() > 0 {
-		return nil, fmt.Errorf("error getting workspaces: %s: %s", err, out.String())
-	} else if err != nil {
-		return nil, fmt.Errorf("error getting workspaces: %s", err)
-	}
-
-	res := []Workspace{}
-	err = json.NewDecoder(out).Decode(&res)
-	if err != nil {
-		return nil, err
-	}
-
-	return res, nil
+	return i3.GetWorkspaces()
 }
 
-func WorkspaceByNum(i int) (*Workspace, error) {
+func WorkspaceByNum(i int64) (*Workspace, error) {
 	wks, err := Workspaces()
 	if err != nil {
 		return nil, err
@@ -72,19 +45,27 @@ func WorkspaceByName(n string) (*Workspace, error) {
 
 func SwitchToWorkspace(name string) error {
 	log.Printf("switching to workspace %s", name)
-	return Exec(fmt.Sprintf("workspace %s", name))
+	_, err := i3.RunCommand(fmt.Sprintf("workspace %s", name))
+	return err
 }
 
-func CloseWorkspace(num int) error {
+func CloseWorkspace(num int64) error {
 	log.Printf("closing workspace %d", num)
-	return Exec(fmt.Sprintf("[workspace=^%d] kill", num))
+	_, err := i3.RunCommand(fmt.Sprintf("[workspace=^%d] kill", num))
+	return err
 }
 
 func RenameWorkspace(num int, title string) error {
 	log.Printf("renaming workspace %d to %s", num, title)
-	return Exec(
+	_, err := i3.RunCommand(
 		fmt.Sprintf("rename workspace %d to \"%s\"", num, title),
 	)
+	return err
+}
+
+func MoveCurrentWorkspace(display string) error {
+	_, err := i3.RunCommand(fmt.Sprintf("move workspace to output %s", display))
+	return err
 }
 
 func WorkspaceHasWindows(name string) bool {
@@ -92,6 +73,9 @@ func WorkspaceHasWindows(name string) bool {
 	wk := tree.Root.FindChild(func(n *i3.Node) bool {
 		return n.Type == i3.WorkspaceNode && n.Name == name
 	})
+	if wk == nil {
+		return false
+	}
 
 	return wk.FindChild(func(n *i3.Node) bool {
 		return n.Type == i3.Con && n.Name != ""

@@ -14,70 +14,105 @@ import (
 	"github.com/shimmerglass/i3-workspace-manager/i3"
 )
 
+const winSpawnTimeout = 5 * time.Second
+
 func (m *Manager) OpenProject(project string) error {
 	log.Printf("opening project %s", project)
 
-	wks, err := m.ProjectWks(project)
+	err := m.setupProject(project)
 	if err != nil {
 		return err
 	}
 
-	err = m.setupProject(project)
-	if err != nil {
-		return err
-	}
-	for i, w := range wks {
-		if w != nil {
-			if !w.Visible {
-				err := i3.SwitchToWorkspace(w.Name)
+	for _, cfg := range m.Workspaces {
+		wk, ok, err := m.ProjectWks(project, cfg.Display)
+		if err != nil {
+			return err
+		}
+
+		if ok {
+			hasWindows := i3.WorkspaceHasWindows(wk.Name)
+			if !wk.Visible || !hasWindows {
+				err := i3.SwitchToWorkspace(wk.Name)
+				if err != nil {
+					return err
+				}
+			}
+			if !hasWindows {
+				err = m.openProjectDisplay(project, cfg)
 				if err != nil {
 					return err
 				}
 			}
 		} else {
-			wkn, err := m.nextWorkspacesID()
+			err := m.openProjectCreateWks(project, cfg)
 			if err != nil {
 				return err
 			}
-
-			displayActiveWorkspace, err := m.displayActiveWorkspace(m.Workspaces[i].Display)
+			err = m.openProjectDisplay(project, cfg)
 			if err != nil {
 				return err
 			}
+		}
+	}
 
-			if displayActiveWorkspace != "" {
-				err = i3.SwitchToWorkspace(displayActiveWorkspace)
-				if err != nil {
-					return err
-				}
+	return nil
+}
 
-				time.Sleep(100 * time.Millisecond)
+func (m *Manager) openProjectCreateWks(project string, cfg Workspace) error {
+	wkn, err := m.nextWorkspacesID()
+	if err != nil {
+		return err
+	}
+
+	activeWks, err := m.displayActiveWorkspace(cfg.Display)
+	if err != nil {
+		return err
+	}
+
+	if activeWks != "" {
+		err = i3.SwitchToWorkspace(activeWks)
+		if err != nil {
+			return err
+		}
+	}
+
+	wksName := fmt.Sprintf("%d: %s", wkn, project)
+	err = i3.SwitchToWorkspace(wksName)
+	if err != nil {
+		return err
+	}
+
+	if activeWks == "" {
+		err = i3.MoveCurrentWorkspace(cfg.Display)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (m *Manager) openProjectDisplay(project string, cfg Workspace) error {
+	winEvts, done := i3.WinEvents()
+	defer done()
+
+	err := m.runOpenCommand(project, cfg.Command)
+	if err != nil {
+		return err
+	}
+
+	timeout := time.NewTimer(winSpawnTimeout)
+WaitWindow:
+	for {
+		select {
+		case ev := <-winEvts:
+			log.Printf("i3 win event: %+v", ev)
+			if ev.Change == "new" {
+				break WaitWindow
 			}
-
-			name := fmt.Sprintf("%d: %s", wkn, project)
-
-			err = i3.SwitchToWorkspace(name)
-			if err != nil {
-				return err
-			}
-
-			time.Sleep(100 * time.Millisecond)
-
-			if displayActiveWorkspace == "" {
-				err = i3.Exec(fmt.Sprintf("move workspace to output %s", m.Workspaces[i].Display))
-				if err != nil {
-					return err
-				}
-
-				time.Sleep(100 * time.Millisecond)
-			}
-
-			err = m.runOpenCommand(project, m.Workspaces[i].Command)
-			if err != nil {
-				return err
-			}
-
-			time.Sleep(time.Second)
+		case <-timeout.C:
+			return fmt.Errorf("command %q did not spawn any new window after %s", cfg.Command, winSpawnTimeout)
 		}
 	}
 
