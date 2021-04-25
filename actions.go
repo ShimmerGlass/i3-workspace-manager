@@ -177,7 +177,7 @@ func (m *Manager) ActionClose() error {
 		return err
 	}
 
-	clean := true
+	dirtyWks := ""
 	for _, wk := range workspaces {
 		p, ok := workspaceProject(wk)
 		if !ok || p != project {
@@ -190,14 +190,15 @@ func (m *Manager) ActionClose() error {
 		}
 
 		if i3.WorkspaceHasWindows(wk.Name) {
-			clean = false
+			dirtyWks = wk.Name
 		}
 	}
 
-	if clean {
+	if dirtyWks == "" {
 		beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
 	} else {
-		beeep.Notify("i3wks", fmt.Sprintf("Some windows could not be closed closing project %s", project), "")
+		beeep.Notify("i3wks", fmt.Sprintf("Some windows could not be closed for project %s", project), "")
+		i3.SwitchToWorkspace(dirtyWks)
 	}
 
 	return nil
