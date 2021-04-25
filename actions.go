@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/gen2brain/beeep"
 	"github.com/shimmerglass/i3-workspace-manager/history"
@@ -164,41 +165,52 @@ func (m *Manager) ActionClose() error {
 
 	hist.Sort(opened)
 
-	project, err := sel.DoChoices(opened, "Close project", len(opened)-1)
-	if err != nil {
-		return err
-	}
-	if project == "" {
-		return nil
-	}
-
-	workspaces, err := i3.Workspaces()
+	projects, err := sel.DoChoicesMulti(opened, "Close projects", len(opened)-1)
 	if err != nil {
 		return err
 	}
 
-	dirtyWks := ""
-	for _, wk := range workspaces {
-		p, ok := workspaceProject(wk)
-		if !ok || p != project {
-			continue
-		}
-
-		err := i3.CloseWorkspace(wk.Num)
+	for _, project := range projects {
+		workspaces, err := i3.Workspaces()
 		if err != nil {
 			return err
 		}
 
-		if i3.WorkspaceHasWindows(wk.Name) {
-			dirtyWks = wk.Name
-		}
-	}
+		dirtyWks := ""
+	NextWorkspace:
+		for _, wk := range workspaces {
+			p, ok := workspaceProject(wk)
+			if !ok || p != project {
+				continue
+			}
 
-	if dirtyWks == "" {
+			winEvts, done := i3.WinEvents()
+			err := i3.CloseWorkspace(wk.Num)
+			if err != nil {
+				done()
+				return err
+			}
+
+			timeout := time.After(time.Second)
+			for {
+				select {
+				case <-winEvts:
+					if !i3.WorkspaceHasWindows(wk.Name) {
+						done()
+						continue NextWorkspace
+					}
+				case <-timeout:
+					done()
+					if i3.WorkspaceHasWindows(wk.Name) {
+						i3.SwitchToWorkspace(dirtyWks)
+						return fmt.Errorf("Some windows could not be closed for project %s", project)
+					}
+					break
+				}
+			}
+		}
+
 		beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
-	} else {
-		beeep.Notify("i3wks", fmt.Sprintf("Some windows could not be closed for project %s", project), "")
-		i3.SwitchToWorkspace(dirtyWks)
 	}
 
 	return nil
