@@ -36,6 +36,7 @@ func (h *History) Remove(p string) {
 
 		copy(h.Projects[i:], h.Projects[i+1:])
 		h.Projects = h.Projects[:len(h.Projects)-1]
+		return
 	}
 }
 
