@@ -41,12 +41,16 @@ func (m *Manager) ActionOpen() error {
 }
 
 func (m *Manager) ActionSelect() error {
-	hist, err := history.Get()
+	projects, err := m.OpenProjects()
 	if err != nil {
 		return err
 	}
 
-	projects, err := m.OpenProjects()
+	if len(projects) == 0 {
+		return m.ActionOpen()
+	}
+
+	hist, err := history.Get()
 	if err != nil {
 		return err
 	}
