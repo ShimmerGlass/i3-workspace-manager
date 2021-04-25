@@ -76,7 +76,7 @@ func SwitchToWorkspace(name string) error {
 }
 
 func CloseWorkspace(num int) error {
-	log.Printf("closing to workspace %d", num)
+	log.Printf("closing workspace %d", num)
 	return Exec(fmt.Sprintf("[workspace=^%d] kill", num))
 }
 

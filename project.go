@@ -1,16 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"sync"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/shimmerglass/i3-workspace-manager/i3"
-	"github.com/shimmerglass/i3-workspace-manager/sel"
 )
 
 func (m *Manager) OpenProject(project string) error {
@@ -25,9 +26,6 @@ func (m *Manager) OpenProject(project string) error {
 	if err != nil {
 		return err
 	}
-
-	cmdErrs := make([]error, len(wks))
-	var wg sync.WaitGroup
 	for i, w := range wks {
 		if w != nil {
 			if !w.Visible {
@@ -74,20 +72,12 @@ func (m *Manager) OpenProject(project string) error {
 				time.Sleep(100 * time.Millisecond)
 			}
 
-			wg.Add(1)
-			go func(i int, cmd string) {
-				cmdErrs[i] = m.runOpenCommand(project, cmd)
-				wg.Done()
-			}(i, m.Workspaces[i].Command)
+			err = m.runOpenCommand(project, m.Workspaces[i].Command)
+			if err != nil {
+				return err
+			}
 
 			time.Sleep(time.Second)
-		}
-	}
-
-	wg.Wait()
-	for _, err := range cmdErrs {
-		if err != nil {
-			return err
 		}
 	}
 
@@ -102,7 +92,7 @@ func (m *Manager) runOpenCommand(project, command string) error {
 	cmd.Stdout = out
 	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", project))
 	cmd.Env = env
-	err := cmd.Run()
+	err := cmd.Start()
 	if err != nil {
 		if out.Len() > 0 {
 			return fmt.Errorf("error opening workspace with command %s: %s", command, out.String())
@@ -110,7 +100,7 @@ func (m *Manager) runOpenCommand(project, command string) error {
 		return fmt.Errorf("error setting up workspace: %s", err)
 	}
 
-	return nil
+	return cmd.Process.Release()
 }
 
 func (m *Manager) setupProject(name string) error {
@@ -134,7 +124,7 @@ func (m *Manager) setupProject(name string) error {
 	return nil
 }
 
-func (m *Manager) projectList() (string, error) {
+func (m *Manager) ProjectList() ([]string, error) {
 	cmd := exec.Command("/bin/sh", "-c", m.ListCommand)
 	stderr := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
@@ -143,10 +133,22 @@ func (m *Manager) projectList() (string, error) {
 	err := cmd.Run()
 	if err != nil {
 		if len(stderr.Bytes()) > 0 {
-			return "", fmt.Errorf(string(stderr.Bytes()))
+			return nil, fmt.Errorf(string(stderr.Bytes()))
 		}
-		return "", fmt.Errorf("error listing projects: %s", err)
+		return nil, fmt.Errorf("error listing projects: %s", err)
 	}
 
-	return sel.Do(stdout)
+	res := []string{}
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		p := scanner.Text()
+		if p == "" {
+			continue
+		}
+		res = append(res, strings.TrimSpace(p))
+	}
+
+	sort.Strings(res)
+
+	return res, nil
 }

@@ -80,6 +80,6 @@ func main() {
 	}
 
 	if err != nil {
-		beeep.Notify("i3-workspace-manager error", err.Error(), "")
+		beeep.Notify("i3wks error", err.Error(), "")
 	}
 }

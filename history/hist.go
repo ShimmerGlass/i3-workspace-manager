@@ -1,12 +1,17 @@
 package history
 
 import (
-	"io/ioutil"
+	"bufio"
+	"bytes"
+	"math"
 	"os"
 	"os/user"
 	"path"
+	"sort"
 	"strings"
 )
+
+const historyMaxSize = 200
 
 var histFile string
 
@@ -18,71 +23,102 @@ func init() {
 	histFile = path.Join(user.HomeDir, ".i3-wks-history")
 }
 
-func Get() ([]string, error) {
-	l, err := ioutil.ReadFile(histFile)
+type History struct {
+	Position int
+	Projects []string
+}
+
+func (h *History) Remove(p string) {
+	for i := range h.Projects {
+		if h.Projects[i] != p {
+			continue
+		}
+
+		copy(h.Projects[i:], h.Projects[i+1:])
+		h.Projects = h.Projects[:len(h.Projects)-1]
+	}
+}
+
+func (h *History) Add(p string) {
+	h.Remove(p)
+	h.Projects = append([]string{p}, h.Projects...)
+	h.Position = 0
+}
+
+func (h *History) Sort(s []string) {
+	sort.SliceStable(s, func(i, j int) bool {
+		ip := h.projectIdx(s[i])
+		jp := h.projectIdx(s[j])
+
+		return ip < jp
+	})
+}
+
+func (h *History) projectIdx(p string) int {
+	for i, hp := range h.Projects {
+		if hp == p {
+			return i
+		}
+	}
+
+	return math.MaxInt32
+}
+
+func Get() (*History, error) {
+	res := &History{}
+
+	f, err := os.Open(histFile)
 	if os.IsNotExist(err) {
-		return nil, nil
+		return res, nil
 	}
 	if err != nil {
-		return nil, err
+		return res, err
 	}
-	if len(l) == 0 {
-		return nil, nil
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) < 2 {
+			continue
+		}
+
+		if line[0] != '>' && line[0] != ' ' {
+			continue
+		}
+
+		res.Projects = append(res.Projects, strings.TrimSpace(line[2:]))
+		if line[0] == '>' {
+			res.Position = len(res.Projects) - 1
+		}
 	}
 
-	return strings.Split(string(l), "\n"), nil
+	if scanner.Err() != nil {
+		return res, scanner.Err()
+	}
+
+	return res, nil
+
 }
 
-func Add(l string) error {
-	hist, err := Get()
-	if err != nil {
-		return err
+func Write(h *History) error {
+	buf := &bytes.Buffer{}
+
+	projects := h.Projects
+	if len(projects) > historyMaxSize {
+		projects = projects[:historyMaxSize]
 	}
-	for i := 0; i < len(hist); i++ {
-		if hist[i] == l {
-			copy(hist[i:], hist[i+1:])
-			hist = hist[:len(hist)-1]
-			break
+
+	for i, p := range projects {
+		if h.Position == i {
+			buf.WriteByte('>')
+		} else {
+			buf.WriteByte(' ')
 		}
-	}
-	hist = append([]string{l}, hist...)
-
-	return ioutil.WriteFile(histFile, []byte(strings.Join(hist, "\n")), 0644)
-}
-
-func Filter(projects []string) error {
-	hist, err := Get()
-	if err != nil {
-		return err
-	}
-	for i := 0; i < len(hist); i++ {
-		found := false
-		for _, p := range projects {
-			if p == hist[i] {
-				found = true
-				break
-			}
-		}
-		if !found {
-			copy(hist[i:], hist[i+1:])
-			hist = hist[:len(hist)-1]
-			break
-		}
+		buf.WriteByte(' ')
+		buf.WriteString(p)
+		buf.WriteByte('\n')
 	}
 
-	err = ioutil.WriteFile(histFile, []byte(strings.Join(hist, "\n")), 0644)
-	if err != nil {
-		return err
-	}
-
-	idx, err := Index()
-	if err != nil {
-		return err
-	}
-
-	if idx >= len(hist) {
-		return SetIndex(len(hist) - 1)
-	}
-
-	return nil
+	return os.WriteFile(histFile, buf.Bytes(), 0o644)
 }

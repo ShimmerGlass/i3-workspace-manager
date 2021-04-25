@@ -1,13 +1,28 @@
 package main
 
 import (
+	"fmt"
+
+	"github.com/gen2brain/beeep"
 	"github.com/shimmerglass/i3-workspace-manager/history"
 	"github.com/shimmerglass/i3-workspace-manager/i3"
 	"github.com/shimmerglass/i3-workspace-manager/sel"
 )
 
 func (m *Manager) ActionOpen() error {
-	project, err := m.projectList()
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+
+	projects, err := m.ProjectList()
+	if err != nil {
+		return err
+	}
+
+	hist.Sort(projects)
+
+	project, err := sel.DoChoices(projects, "Open project", 0)
 	if err != nil {
 		return err
 	}
@@ -20,29 +35,39 @@ func (m *Manager) ActionOpen() error {
 		return err
 	}
 
-	err = history.SetIndex(0)
-	if err != nil {
-		return err
-	}
-	currents, err := m.OpenProjects()
-	if err != nil {
-		return err
-	}
-	err = history.Filter(currents)
-	if err != nil {
-		return err
-	}
+	hist.Add(project)
 
-	return history.Add(project)
+	return history.Write(hist)
 }
 
 func (m *Manager) ActionSelect() error {
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+
 	projects, err := m.OpenProjects()
 	if err != nil {
 		return err
 	}
 
-	project, err := sel.DoChoices(projects)
+	hist.Sort(projects)
+
+	current, ok, err := m.CurrentProject()
+	if err != nil {
+		return err
+	}
+
+	pos := 0
+	if ok {
+		for i, p := range projects {
+			if p == current {
+				pos = i
+			}
+		}
+	}
+
+	project, err := sel.DoChoices(projects, "Select project", pos)
 	if err != nil {
 		return err
 	}
@@ -55,20 +80,9 @@ func (m *Manager) ActionSelect() error {
 		return err
 	}
 
-	err = history.SetIndex(0)
-	if err != nil {
-		return err
-	}
-	currents, err := m.OpenProjects()
-	if err != nil {
-		return err
-	}
-	err = history.Filter(currents)
-	if err != nil {
-		return err
-	}
+	hist.Add(project)
 
-	return history.Add(project)
+	return history.Write(hist)
 }
 
 func (m *Manager) ActionHistoryGo(n int) error {
@@ -90,67 +104,83 @@ func (m *Manager) ActionHistoryGo(n int) error {
 	if err != nil {
 		return err
 	}
-	if len(hist) == 0 {
+
+	openProjects, err := m.OpenProjects()
+	if err != nil {
+		return err
+	}
+	if len(openProjects) == 0 {
 		return nil
 	}
 
-	histIndex, err := history.Index()
-	if err != nil {
-		return err
-	}
+	selected := ""
+	pos := hist.Position
+Outer:
+	for i := 0; i < len(hist.Projects); i++ {
+		pos = (pos + n) % len(hist.Projects)
+		if pos < 0 {
+			pos = len(hist.Projects) - 1
+		}
 
-	histIndex += n
-	if histIndex < 0 {
-		histIndex = 0
-	}
-	if histIndex >= len(hist) {
-		histIndex = len(hist) - 1
-	}
-
-	err = m.OpenProject(hist[histIndex])
-	if err != nil {
-		return err
-	}
-
-	err = history.SetIndex(histIndex)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (m *Manager) ActionClose() error {
-	current, ok, err := m.CurrentProject()
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-
-	wks, err := m.ProjectWks(current)
-	if err != nil {
-		return err
-	}
-
-	for _, w := range wks {
-		if w != nil {
-			err := i3.CloseWorkspace(w.Num)
-			if err != nil {
-				return err
+		for _, o := range openProjects {
+			if o == hist.Projects[pos] {
+				selected = o
+				break Outer
 			}
 		}
 	}
 
-	currents, err := m.OpenProjects()
-	if err != nil {
-		return err
+	if selected == "" {
+		return nil
 	}
-	err = history.Filter(currents)
+
+	err = m.OpenProject(selected)
 	if err != nil {
 		return err
 	}
 
-	return m.ActionHistoryGo(1)
+	hist.Position = pos
+
+	return history.Write(hist)
+}
+
+func (m *Manager) ActionClose() error {
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+
+	opened, err := m.OpenProjects()
+	if err != nil {
+		return err
+	}
+	if len(opened) == 0 {
+		return nil
+	}
+
+	hist.Sort(opened)
+
+	project, err := sel.DoChoices(opened, "Close project", len(opened)-1)
+	if err != nil {
+		return err
+	}
+	if project == "" {
+		return nil
+	}
+
+	wks, err := m.ProjectWks(project)
+	if err != nil {
+		return err
+	}
+
+	for _, wk := range wks {
+		err := i3.CloseWorkspace(wk.Num)
+		if err != nil {
+			return err
+		}
+	}
+
+	beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
+
+	return nil
 }
