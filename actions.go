@@ -179,13 +179,16 @@ func (m *Manager) ActionClose() error {
 		dirtyWks := ""
 	NextWorkspace:
 		for _, wk := range workspaces {
-			p, ok := workspaceProject(wk)
-			if !ok || p != project {
+			wkInfo, ok, err := decodeWorkspaceName(wk)
+			if err != nil {
+				return err
+			}
+			if !ok || wkInfo.Project != project {
 				continue
 			}
 
 			winEvts, done := i3.WinEvents()
-			err := i3.CloseWorkspace(wk.Num)
+			err = i3.CloseWorkspace(wk.Num)
 			if err != nil {
 				done()
 				return err

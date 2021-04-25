@@ -12,9 +12,10 @@ import (
 )
 
 type Manager struct {
-	Workspaces   []Workspace
-	SetupCommand string
-	ListCommand  string
+	Workspaces     []Workspace
+	SetupCommand   string
+	ListCommand    string
+	WksNameCommand string
 }
 
 type Workspace struct {
@@ -47,6 +48,7 @@ func main() {
 
 	setupCommand := flag.String("setup-cmd", "", "Setup command for project")
 	listCommand := flag.String("list-cmd", "", "Setup command for listing project")
+	wkNameCommand := flag.String("wksname-cmd", "", "Command to set the names of each workspace")
 	var workspaces arrayFlags
 	flag.Var(&workspaces, "wk", "Workspace: `display_name:command`")
 
@@ -58,9 +60,10 @@ func main() {
 	flag.Parse()
 
 	m := &Manager{
-		SetupCommand: *setupCommand,
-		ListCommand:  *listCommand,
-		Workspaces:   parseWorkspaces(workspaces),
+		SetupCommand:   *setupCommand,
+		ListCommand:    *listCommand,
+		WksNameCommand: *wkNameCommand,
+		Workspaces:     parseWorkspaces(workspaces),
 	}
 
 	var err error

@@ -77,8 +77,15 @@ func (m *Manager) openProjectCreateWks(project string, cfg Workspace) error {
 		}
 	}
 
-	wksName := fmt.Sprintf("%d: %s", wkn, project)
-	err = i3.SwitchToWorkspace(wksName)
+	userWksName, err := m.workspaceName(project)
+	if err != nil {
+		return err
+	}
+	wksName := encodeWorkspaceName(userWksName, wksInfo{
+		Project: project,
+		Display: cfg.Display,
+	})
+	err = i3.SwitchToWorkspace(fmt.Sprintf("%d:%s", wkn, wksName))
 	if err != nil {
 		return err
 	}
@@ -157,6 +164,29 @@ func (m *Manager) setupProject(name string) error {
 		return fmt.Errorf("error setting up project: %s", err)
 	}
 	return nil
+}
+
+func (m *Manager) workspaceName(name string) (string, error) {
+	if m.WksNameCommand == "" {
+		return name, nil
+	}
+
+	cmd := exec.Command("/bin/sh", "-c", m.WksNameCommand)
+	env := os.Environ()
+	stderr := &bytes.Buffer{}
+	stdout := &bytes.Buffer{}
+	cmd.Stderr = stderr
+	cmd.Stdout = stdout
+	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", name))
+	cmd.Env = env
+	err := cmd.Run()
+	if err != nil {
+		if len(stderr.Bytes()) > 0 {
+			return "", fmt.Errorf(string(stderr.Bytes()))
+		}
+		return "", fmt.Errorf("error getting workspace name: %s", err)
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 func (m *Manager) ProjectList() ([]string, error) {

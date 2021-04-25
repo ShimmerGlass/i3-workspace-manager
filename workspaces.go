@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"encoding/gob"
 	"sort"
 	"strings"
 
+	"github.com/eknkc/basex"
 	"github.com/shimmerglass/i3-workspace-manager/i3"
 )
 
@@ -11,13 +14,47 @@ const (
 	workspaceStart = 20
 )
 
-func workspaceProject(wk i3.Workspace) (string, bool) {
-	parts := strings.Split(wk.Name, ": ")
+var encoding *basex.Encoding
+
+func init() {
+	e, err := basex.NewEncoding("\uFEFF\u200D")
+	if err != nil {
+		panic(err)
+	}
+	encoding = e
+}
+
+type wksInfo struct {
+	Project string
+	Display string
+}
+
+func encodeWorkspaceName(name string, info wksInfo) string {
+	buf := &bytes.Buffer{}
+	gob.NewEncoder(buf).Encode(info)
+	return name + "\u200B" + encoding.Encode(buf.Bytes())
+}
+
+func decodeWorkspaceName(wk i3.Workspace) (wksInfo, bool, error) {
+	res := wksInfo{}
+
+	parts := strings.Split(wk.Name, "\u200B")
 	if len(parts) != 2 {
-		return "", false
+		return res, false, nil
 	}
 
-	return parts[1], true
+	bin, err := encoding.Decode(parts[1])
+	if err != nil {
+		return res, false, err
+	}
+
+	buf := bytes.NewBuffer(bin)
+	err = gob.NewDecoder(buf).Decode(&res)
+	if err != nil {
+		return res, false, err
+	}
+
+	return res, true, nil
 }
 
 func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error) {
@@ -27,12 +64,15 @@ func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error
 	}
 
 	for _, w := range wks {
-		wkProject, ok := workspaceProject(w)
+		wkInfo, ok, err := decodeWorkspaceName(w)
+		if err != nil {
+			return i3.Workspace{}, false, err
+		}
 		if !ok {
 			continue
 		}
 
-		if wkProject != project {
+		if wkInfo.Project != project {
 			continue
 		}
 
@@ -57,9 +97,12 @@ func (m *Manager) CurrentProject() (string, bool, error) {
 			continue
 		}
 
-		project, ok := workspaceProject(w)
+		wkInfo, ok, err := decodeWorkspaceName(w)
+		if err != nil {
+			return "", false, err
+		}
 		if ok {
-			return project, true, nil
+			return wkInfo.Project, true, nil
 		}
 	}
 
@@ -77,13 +120,17 @@ func (m *Manager) IsProjectVisble(project string) (bool, error) {
 			continue
 		}
 
-		p, ok := workspaceProject(w)
-		if ok && p == project {
+		wkInfo, ok, err := decodeWorkspaceName(w)
+		if err != nil {
+			return false, err
+		}
+
+		if ok && wkInfo.Project == project {
 			i++
 		}
 	}
 
-	return i == 2, nil
+	return i == len(m.Workspaces), nil
 }
 
 func (m *Manager) OpenProjects() ([]string, error) {
@@ -99,9 +146,12 @@ func (m *Manager) OpenProjects() ([]string, error) {
 			continue
 		}
 
-		project, ok := workspaceProject(w)
+		wkInfo, ok, err := decodeWorkspaceName(w)
+		if err != nil {
+			return nil, err
+		}
 		if ok {
-			pmap[project] = true
+			pmap[wkInfo.Project] = true
 		}
 	}
 
@@ -123,27 +173,20 @@ func (m *Manager) nextWorkspacesID() (int64, error) {
 		return 0, err
 	}
 
-	n := minWorkspace
+	usedNums := map[int64]bool{}
 	for _, w := range wks {
-		if !i3.WorkspaceHasWindows(w.Name) {
-			continue
-		}
-
-		_, ok := workspaceProject(w)
-		if !ok {
-			continue
-		}
-
-		if w.Num > n {
-			n = w.Num
-		}
+		usedNums[w.Num] = true
 	}
 
-	n++
+	for n := minWorkspace; true; n++ {
+		if usedNums[n] {
+			continue
+		}
+		minWorkspace = n + 1
+		return n, nil
+	}
 
-	minWorkspace = n
-
-	return n, nil
+	return 0, nil
 }
 
 func (m *Manager) displayActiveWorkspace(display string) (string, error) {
