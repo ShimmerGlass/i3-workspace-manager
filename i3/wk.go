@@ -51,7 +51,7 @@ func SwitchToWorkspace(name string) error {
 
 func CloseWorkspace(num int64) error {
 	log.Printf("closing workspace %d", num)
-	_, err := i3.RunCommand(fmt.Sprintf("[workspace=^%d] kill", num))
+	_, err := i3.RunCommand(fmt.Sprintf(`[workspace="^%d" tiling] kill`, num))
 	return err
 }
 
@@ -76,9 +76,10 @@ func WorkspaceHasWindows(name string) bool {
 	if wk == nil {
 		return false
 	}
-
-	return wk.FindChild(func(n *i3.Node) bool {
-		return n.Type == i3.Con && n.Name != ""
-	}) != nil
-
+	for _, c := range wk.Nodes {
+		return c.FindChild(func(n *i3.Node) bool {
+			return n.Type == i3.Con && n.Name != ""
+		}) != nil
+	}
+	return false
 }

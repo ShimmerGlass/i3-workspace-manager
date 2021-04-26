@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -171,12 +172,12 @@ func (m *Manager) ActionClose() error {
 	}
 
 	for _, project := range projects {
+		log.Printf("closing project %s", project)
 		workspaces, err := i3.Workspaces()
 		if err != nil {
 			return err
 		}
 
-		dirtyWks := ""
 	NextWorkspace:
 		for _, wk := range workspaces {
 			wkInfo, ok, err := decodeWorkspaceName(wk)
@@ -186,6 +187,8 @@ func (m *Manager) ActionClose() error {
 			if !ok || wkInfo.Project != project {
 				continue
 			}
+
+			log.Printf("closing workspace %s", wk.Name)
 
 			winEvts, done := i3.WinEvents()
 			err = i3.CloseWorkspace(wk.Num)
@@ -205,7 +208,7 @@ func (m *Manager) ActionClose() error {
 				case <-timeout:
 					done()
 					if i3.WorkspaceHasWindows(wk.Name) {
-						i3.SwitchToWorkspace(dirtyWks)
+						i3.SwitchToWorkspace(wk.Name)
 						return fmt.Errorf("Some windows could not be closed for project %s", project)
 					}
 					break
