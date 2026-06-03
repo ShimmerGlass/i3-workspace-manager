@@ -1,20 +1,21 @@
 package i3
 
 import (
+	"context"
 	"fmt"
 	"log"
 
-	i3 "go.i3wm.org/i3/v4"
+	i3 "github.com/joshuarubin/go-sway"
 )
 
 type Workspace = i3.Workspace
 
-func Workspaces() ([]Workspace, error) {
-	return i3.GetWorkspaces()
+func Workspaces(sw i3.Client) ([]Workspace, error) {
+	return sw.GetWorkspaces(context.Background())
 }
 
-func WorkspaceByNum(i int64) (*Workspace, error) {
-	wks, err := Workspaces()
+func WorkspaceByNum(sw i3.Client, i int64) (*Workspace, error) {
+	wks, err := Workspaces(sw)
 	if err != nil {
 		return nil, err
 	}
@@ -28,8 +29,8 @@ func WorkspaceByNum(i int64) (*Workspace, error) {
 	return nil, nil
 }
 
-func WorkspaceByName(n string) (*Workspace, error) {
-	wks, err := Workspaces()
+func WorkspaceByName(sw i3.Client, n string) (*Workspace, error) {
+	wks, err := Workspaces(sw)
 	if err != nil {
 		return nil, err
 	}
@@ -43,42 +44,58 @@ func WorkspaceByName(n string) (*Workspace, error) {
 	return nil, nil
 }
 
-func SwitchToWorkspace(name string) error {
+func SwitchToWorkspace(sw i3.Client, name string) error {
 	log.Printf("switching to workspace %s", name)
-	_, err := i3.RunCommand(fmt.Sprintf("workspace %s", name))
+	_, err := sw.RunCommand(context.Background(), fmt.Sprintf("workspace %s", name))
 	return err
 }
 
-func CloseWorkspace(num int64) error {
+func AssignWorkspace(sw i3.Client, name, output string) error {
+	log.Printf("switching to workspace %s", name)
+	_, err := sw.RunCommand(context.Background(), fmt.Sprintf("workspace %s output %s", name, output))
+	return err
+}
+
+func CloseWorkspace(sw i3.Client, num int64) error {
 	log.Printf("closing workspace %d", num)
-	_, err := i3.RunCommand(fmt.Sprintf(`[workspace="^%d" tiling] kill`, num))
+	_, err := sw.RunCommand(context.Background(), fmt.Sprintf(`[workspace="^%d" tiling] kill`, num))
 	return err
 }
 
-func RenameWorkspace(num int, title string) error {
+func RenameWorkspace(sw i3.Client, num int, title string) error {
 	log.Printf("renaming workspace %d to %s", num, title)
-	_, err := i3.RunCommand(
+	_, err := sw.RunCommand(
+		context.Background(),
 		fmt.Sprintf("rename workspace %d to \"%s\"", num, title),
 	)
 	return err
 }
 
-func MoveCurrentWorkspace(display string) error {
-	_, err := i3.RunCommand(fmt.Sprintf("move workspace to output %s", display))
+func MoveCurrentWorkspace(sw i3.Client, display string) error {
+	_, err := sw.RunCommand(context.Background(), fmt.Sprintf("move workspace to output %s", display))
 	return err
 }
 
-func WorkspaceHasWindows(name string) bool {
-	tree, _ := i3.GetTree()
-	wk := tree.Root.FindChild(func(n *i3.Node) bool {
-		return n.Type == i3.WorkspaceNode && n.Name == name
+func MoveContainerToWorkspace(sw i3.Client, conID int64, wksName string) error {
+	log.Printf("moving container %d to workspace %s", conID, wksName)
+	_, err := sw.RunCommand(
+		context.Background(),
+		fmt.Sprintf(`[con_id=%d] move container to workspace "%s"`, conID, wksName),
+	)
+	return err
+}
+
+func WorkspaceHasWindows(sw i3.Client, name string) bool {
+	tree, _ := sw.GetTree(context.Background())
+	wk := tree.TraverseNodes(func(n *i3.Node) bool {
+		return n.Type == i3.NodeWorkspace && n.Name == name
 	})
 	if wk == nil {
 		return false
 	}
 	for _, c := range wk.Nodes {
-		return c.FindChild(func(n *i3.Node) bool {
-			return n.Type == i3.Con && n.Name != ""
+		return c.TraverseNodes(func(n *i3.Node) bool {
+			return n.Type == i3.NodeCon && n.Name != ""
 		}) != nil
 	}
 	return false

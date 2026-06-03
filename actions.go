@@ -173,7 +173,7 @@ func (m *Manager) ActionClose() error {
 
 	for _, project := range projects {
 		log.Printf("closing project %s", project)
-		workspaces, err := i3.Workspaces()
+		workspaces, err := i3.Workspaces(m.sw)
 		if err != nil {
 			return err
 		}
@@ -190,8 +190,12 @@ func (m *Manager) ActionClose() error {
 
 			log.Printf("closing workspace %s", wk.Name)
 
-			winEvts, done := i3.WinEvents()
-			err = i3.CloseWorkspace(wk.Num)
+			winEvts, done, err := i3.WinEvents()
+			if err != nil {
+				return err
+			}
+
+			err = i3.CloseWorkspace(m.sw, wk.Num)
 			if err != nil {
 				done()
 				return err
@@ -201,14 +205,14 @@ func (m *Manager) ActionClose() error {
 			for {
 				select {
 				case <-winEvts:
-					if !i3.WorkspaceHasWindows(wk.Name) {
+					if !i3.WorkspaceHasWindows(m.sw, wk.Name) {
 						done()
 						continue NextWorkspace
 					}
 				case <-timeout:
 					done()
-					if i3.WorkspaceHasWindows(wk.Name) {
-						i3.SwitchToWorkspace(wk.Name)
+					if i3.WorkspaceHasWindows(m.sw, wk.Name) {
+						i3.SwitchToWorkspace(m.sw, wk.Name)
 						return fmt.Errorf("Some windows could not be closed for project %s", project)
 					}
 					break

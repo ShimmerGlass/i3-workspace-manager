@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -9,9 +10,12 @@ import (
 	"strings"
 
 	"github.com/gen2brain/beeep"
+	"github.com/joshuarubin/go-sway"
 )
 
 type Manager struct {
+	sw sway.Client
+
 	Workspaces     []Workspace
 	SetupCommand   string
 	ListCommand    string
@@ -59,14 +63,21 @@ func main() {
 	modeClose := flag.Bool("close", false, "")
 	flag.Parse()
 
+	fmt.Println(workspaces)
+
+	sw, err := sway.New(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	m := &Manager{
+		sw:             sw,
 		SetupCommand:   *setupCommand,
 		ListCommand:    *listCommand,
 		WksNameCommand: *wkNameCommand,
 		Workspaces:     parseWorkspaces(workspaces),
 	}
 
-	var err error
 	switch {
 	case *modeOpen:
 		err = m.ActionOpen()

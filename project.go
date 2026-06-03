@@ -31,25 +31,26 @@ func (m *Manager) OpenProject(project string) error {
 		}
 
 		if ok {
-			hasWindows := i3.WorkspaceHasWindows(wk.Name)
+			hasWindows := i3.WorkspaceHasWindows(m.sw, wk.Name)
 			if !wk.Visible || !hasWindows {
-				err := i3.SwitchToWorkspace(wk.Name)
+				err := i3.SwitchToWorkspace(m.sw, wk.Name)
 				if err != nil {
 					return err
 				}
 			}
 			if !hasWindows {
-				err = m.openProjectDisplay(project, cfg)
+				err = m.openProjectDisplay(project, cfg, wk.Name)
 				if err != nil {
 					return err
 				}
 			}
 		} else {
-			err := m.openProjectCreateWks(project, cfg)
+			wksName, err := m.openProjectCreateWks(project, cfg)
 			if err != nil {
 				return err
 			}
-			err = m.openProjectDisplay(project, cfg)
+
+			err = m.openProjectDisplay(project, cfg, wksName)
 			if err != nil {
 				return err
 			}
@@ -59,52 +60,50 @@ func (m *Manager) OpenProject(project string) error {
 	return nil
 }
 
-func (m *Manager) openProjectCreateWks(project string, cfg Workspace) error {
+func (m *Manager) openProjectCreateWks(project string, cfg Workspace) (string, error) {
 	wkn, err := m.nextWorkspacesID()
 	if err != nil {
-		return err
-	}
-
-	activeWks, err := m.displayActiveWorkspace(cfg.Display)
-	if err != nil {
-		return err
-	}
-
-	if activeWks != "" {
-		err = i3.SwitchToWorkspace(activeWks)
-		if err != nil {
-			return err
-		}
+		return "", err
 	}
 
 	userWksName, err := m.workspaceName(project)
 	if err != nil {
-		return err
+		return "", err
 	}
 	wksName := encodeWorkspaceName(userWksName, wksInfo{
 		Project: project,
 		Display: cfg.Display,
 	})
-	err = i3.SwitchToWorkspace(fmt.Sprintf("%d:%s", wkn, wksName))
+	wksFullName := fmt.Sprintf("%d:%s", wkn, wksName)
+
+	// Assign the workspace to its output *before* creating it. In sway,
+	// `workspace <name> output <output>` only sets a placement rule for future
+	// creation; it does not move a workspace that already exists. Creating the
+	// workspace first (via SwitchToWorkspace) would place it on the currently
+	// focused output instead, which is racy: a previously opened app (e.g. VS
+	// Code) can steal focus back to another display before the next workspace
+	// is created, landing it on the wrong output.
+	err = i3.AssignWorkspace(m.sw, wksFullName, cfg.Display)
+	if err != nil {
+		return "", err
+	}
+
+	err = i3.SwitchToWorkspace(m.sw, wksFullName)
+	if err != nil {
+		return "", err
+	}
+
+	return wksFullName, nil
+}
+
+func (m *Manager) openProjectDisplay(project string, cfg Workspace, wksName string) error {
+	winEvts, done, err := i3.WinEvents()
 	if err != nil {
 		return err
 	}
-
-	if activeWks == "" {
-		err = i3.MoveCurrentWorkspace(cfg.Display)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *Manager) openProjectDisplay(project string, cfg Workspace) error {
-	winEvts, done := i3.WinEvents()
 	defer done()
 
-	err := m.runOpenCommand(project, cfg.Command)
+	err = m.runOpenCommand(project, cfg.Command)
 	if err != nil {
 		return err
 	}
@@ -116,6 +115,16 @@ WaitWindow:
 		case ev := <-winEvts:
 			log.Printf("i3 win event: %+v", ev)
 			if ev.Change == "new" {
+				// The window maps on whichever workspace currently has focus,
+				// which is racy: a slow app opened for a previous display (e.g.
+				// VS Code) can steal focus back before this window appears,
+				// landing it on the wrong workspace. Move the newly spawned
+				// container to its target workspace explicitly, by container id,
+				// so placement does not depend on focus.
+				err := i3.MoveContainerToWorkspace(m.sw, ev.Container.ID, wksName)
+				if err != nil {
+					return err
+				}
 				break WaitWindow
 			}
 		case <-timeout.C:
@@ -127,6 +136,7 @@ WaitWindow:
 }
 
 func (m *Manager) runOpenCommand(project, command string) error {
+	fmt.Println(command)
 	cmd := exec.Command("/bin/sh", "-c", command)
 	env := os.Environ()
 	out := &bytes.Buffer{}

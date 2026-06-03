@@ -58,7 +58,7 @@ func decodeWorkspaceName(wk i3.Workspace) (wksInfo, bool, error) {
 }
 
 func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error) {
-	wks, err := i3.Workspaces()
+	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return i3.Workspace{}, false, err
 	}
@@ -87,7 +87,7 @@ func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error
 }
 
 func (m *Manager) CurrentProject() (string, bool, error) {
-	wks, err := i3.Workspaces()
+	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return "", false, err
 	}
@@ -111,7 +111,7 @@ func (m *Manager) CurrentProject() (string, bool, error) {
 
 func (m *Manager) IsProjectVisble(project string) (bool, error) {
 	i := 0
-	wks, err := i3.Workspaces()
+	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return false, err
 	}
@@ -136,13 +136,13 @@ func (m *Manager) IsProjectVisble(project string) (bool, error) {
 func (m *Manager) OpenProjects() ([]string, error) {
 	pmap := map[string]bool{}
 
-	wks, err := i3.Workspaces()
+	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return nil, err
 	}
 
 	for _, w := range wks {
-		if !i3.WorkspaceHasWindows(w.Name) {
+		if !i3.WorkspaceHasWindows(m.sw, w.Name) {
 			continue
 		}
 
@@ -168,7 +168,7 @@ func (m *Manager) OpenProjects() ([]string, error) {
 var minWorkspace = int64(workspaceStart)
 
 func (m *Manager) nextWorkspacesID() (int64, error) {
-	wks, err := i3.Workspaces()
+	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return 0, err
 	}
@@ -185,18 +185,4 @@ func (m *Manager) nextWorkspacesID() (int64, error) {
 		minWorkspace = n + 1
 		return n, nil
 	}
-}
-
-func (m *Manager) displayActiveWorkspace(display string) (string, error) {
-	allWks, err := i3.Workspaces()
-	if err != nil {
-		return "", err
-	}
-	for _, w := range allWks {
-		if w.Visible && w.Output == display {
-			return w.Name, nil
-		}
-	}
-
-	return "", nil
 }
