@@ -9,9 +9,14 @@ import (
 )
 
 type Workspace = i3.Workspace
+type Output = i3.Output
 
 func Workspaces(sw i3.Client) ([]Workspace, error) {
 	return sw.GetWorkspaces(context.Background())
+}
+
+func Outputs(sw i3.Client) ([]Output, error) {
+	return sw.GetOutputs(context.Background())
 }
 
 func WorkspaceByNum(sw i3.Client, i int64) (*Workspace, error) {

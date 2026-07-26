@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"log"
+	"os/exec"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -10,6 +12,42 @@ import (
 	"github.com/shimmerglass/i3-workspace-manager/i3"
 	"github.com/shimmerglass/i3-workspace-manager/sel"
 )
+
+// ActionDaemon runs in the background and keeps project workspaces pinned to
+// their assigned display across output disconnect/reconnect. go-sway (v1.2.0)
+// cannot subscribe to "output" events, so they are consumed from swaymsg.
+func (m *Manager) ActionDaemon() error {
+	// Reconcile once at startup, in case displays changed while not running.
+	if err := m.reconcileDisplays(); err != nil {
+		log.Printf("initial display reconcile failed: %s", err)
+	}
+
+	cmd := exec.Command("swaymsg", "-r", "-m", "-t", "subscribe", `["output"]`)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		log.Printf("output event: %s", scanner.Text())
+		// Give sway a moment to finish rearranging the connected output before
+		// moving workspaces back onto it.
+		time.Sleep(500 * time.Millisecond)
+		if err := m.reconcileDisplays(); err != nil {
+			log.Printf("display reconcile failed: %s", err)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	return cmd.Wait()
+}
 
 func (m *Manager) ActionOpen() error {
 	hist, err := history.Get()
@@ -215,7 +253,7 @@ func (m *Manager) ActionClose() error {
 						i3.SwitchToWorkspace(m.sw, wk.Name)
 						return fmt.Errorf("Some windows could not be closed for project %s", project)
 					}
-					break
+					continue NextWorkspace
 				}
 			}
 		}

@@ -61,6 +61,7 @@ func main() {
 	modePrev := flag.Bool("prev", false, "")
 	modeNext := flag.Bool("next", false, "")
 	modeClose := flag.Bool("close", false, "")
+	modeDaemon := flag.Bool("daemon", false, "")
 	flag.Parse()
 
 	fmt.Println(workspaces)
@@ -89,8 +90,10 @@ func main() {
 		err = m.ActionHistoryGo(-1)
 	case *modeClose:
 		err = m.ActionClose()
+	case *modeDaemon:
+		err = m.ActionDaemon()
 	default:
-		err = fmt.Errorf("specify one of -open, -select, -prev, -next, -close")
+		err = fmt.Errorf("specify one of -open, -select, -prev, -next, -close, -daemon")
 	}
 
 	if err != nil {

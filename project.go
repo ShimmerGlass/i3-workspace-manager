@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -82,8 +83,14 @@ func (m *Manager) openProjectCreateWks(project string, cfg Workspace) (string, e
 	// workspace first (via SwitchToWorkspace) would place it on the currently
 	// focused output instead, which is racy: a previously opened app (e.g. VS
 	// Code) can steal focus back to another display before the next workspace
-	// is created, landing it on the wrong output.
-	err = i3.AssignWorkspace(m.sw, wksFullName, cfg.Display)
+	// is created, landing it on the wrong output. cfg.Display is a display role
+	// (e.g. "left"), so resolve it to a concrete output for the placement rule;
+	// the role itself is what gets encoded into the name for later reconciling.
+	output, err := m.resolveOutput(cfg.Display)
+	if err != nil {
+		return "", err
+	}
+	err = i3.AssignWorkspace(m.sw, wksFullName, output)
 	if err != nil {
 		return "", err
 	}
@@ -168,8 +175,8 @@ func (m *Manager) setupProject(name string) error {
 	cmd.Env = env
 	err := cmd.Run()
 	if err != nil {
-		if len(stderr.Bytes()) > 0 {
-			return fmt.Errorf(string(stderr.Bytes()))
+		if stderr.Len() > 0 {
+			return errors.New(stderr.String())
 		}
 		return fmt.Errorf("error setting up project: %s", err)
 	}
@@ -191,8 +198,8 @@ func (m *Manager) workspaceName(name string) (string, error) {
 	cmd.Env = env
 	err := cmd.Run()
 	if err != nil {
-		if len(stderr.Bytes()) > 0 {
-			return "", fmt.Errorf(string(stderr.Bytes()))
+		if stderr.Len() > 0 {
+			return "", errors.New(stderr.String())
 		}
 		return "", fmt.Errorf("error getting workspace name: %s", err)
 	}
@@ -207,8 +214,8 @@ func (m *Manager) ProjectList() ([]string, error) {
 	cmd.Stdout = stdout
 	err := cmd.Run()
 	if err != nil {
-		if len(stderr.Bytes()) > 0 {
-			return nil, fmt.Errorf(string(stderr.Bytes()))
+		if stderr.Len() > 0 {
+			return nil, errors.New(stderr.String())
 		}
 		return nil, fmt.Errorf("error listing projects: %s", err)
 	}
