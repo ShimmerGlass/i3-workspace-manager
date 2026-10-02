@@ -1,12 +1,14 @@
 package main
 
+import "strings"
+
 type arrayFlags []string
 
-func (i *arrayFlags) String() string {
-	return "my string representation"
+func (a *arrayFlags) String() string {
+	return strings.Join(*a, ", ")
 }
 
-func (i *arrayFlags) Set(value string) error {
-	*i = append(*i, value)
+func (a *arrayFlags) Set(value string) error {
+	*a = append(*a, value)
 	return nil
 }

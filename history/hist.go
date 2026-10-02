@@ -3,25 +3,20 @@ package history
 import (
 	"bufio"
 	"bytes"
-	"math"
+	"cmp"
+	"errors"
+	"io"
+	"io/fs"
 	"os"
-	"os/user"
-	"path"
-	"sort"
+	"path/filepath"
+	"slices"
 	"strings"
 )
 
-const historyMaxSize = 200
-
-var histFile string
-
-func init() {
-	user, err := user.Current()
-	if err != nil {
-		panic(err)
-	}
-	histFile = path.Join(user.HomeDir, ".i3-wks-history")
-}
+const (
+	maxSize  = 200
+	fileName = ".i3-wks-history"
+)
 
 type History struct {
 	Position int
@@ -29,62 +24,90 @@ type History struct {
 }
 
 func (h *History) Remove(p string) {
-	for i := range h.Projects {
-		if h.Projects[i] != p {
-			continue
-		}
-
-		copy(h.Projects[i:], h.Projects[i+1:])
-		h.Projects = h.Projects[:len(h.Projects)-1]
-		return
-	}
+	h.Projects = slices.DeleteFunc(h.Projects, func(x string) bool { return x == p })
 }
 
 func (h *History) Add(p string) {
 	h.Remove(p)
-	h.Projects = append([]string{p}, h.Projects...)
+	h.Projects = slices.Insert(h.Projects, 0, p)
 	h.Position = 0
 }
 
 func (h *History) Sort(s []string) {
-	sort.SliceStable(s, func(i, j int) bool {
-		ip := h.projectIdx(s[i])
-		jp := h.projectIdx(s[j])
+	idx := make(map[string]int, len(h.Projects))
+	for i, p := range h.Projects {
+		idx[p] = i
+	}
+	rank := func(p string) int {
+		if i, ok := idx[p]; ok {
+			return i
+		}
+		return len(h.Projects)
+	}
 
-		return ip < jp
+	slices.SortStableFunc(s, func(a, b string) int {
+		return cmp.Compare(rank(a), rank(b))
 	})
 }
 
-func (h *History) projectIdx(p string) int {
-	for i, hp := range h.Projects {
-		if hp == p {
-			return i
-		}
+func filePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
 	}
-
-	return math.MaxInt32
+	return filepath.Join(home, fileName), nil
 }
 
 func Get() (*History, error) {
-	res := &History{}
+	p, err := filePath()
+	if err != nil {
+		return nil, err
+	}
 
-	f, err := os.Open(histFile)
-	if os.IsNotExist(err) {
-		return res, nil
+	f, err := os.Open(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return &History{}, nil
 	}
 	if err != nil {
-		return res, err
+		return nil, err
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
+	return parse(f)
+}
+
+func Write(h *History) error {
+	p, err := filePath()
+	if err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(p), fileName+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+
+	_, err = tmp.Write(h.format())
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), p)
+}
+
+func parse(r io.Reader) (*History, error) {
+	res := &History{}
+
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if len(line) < 2 {
-			continue
-		}
-
-		if line[0] != '>' && line[0] != ' ' {
+		if len(line) < 2 || (line[0] != '>' && line[0] != ' ') {
 			continue
 		}
 
@@ -94,32 +117,22 @@ func Get() (*History, error) {
 		}
 	}
 
-	if scanner.Err() != nil {
-		return res, scanner.Err()
-	}
-
-	return res, nil
-
+	return res, scanner.Err()
 }
 
-func Write(h *History) error {
+func (h *History) format() []byte {
+	projects := h.Projects[:min(len(h.Projects), maxSize)]
+	pos := min(h.Position, len(projects)-1)
+
 	buf := &bytes.Buffer{}
-
-	projects := h.Projects
-	if len(projects) > historyMaxSize {
-		projects = projects[:historyMaxSize]
-	}
-
 	for i, p := range projects {
-		if h.Position == i {
-			buf.WriteByte('>')
+		if i == pos {
+			buf.WriteString("> ")
 		} else {
-			buf.WriteByte(' ')
+			buf.WriteString("  ")
 		}
-		buf.WriteByte(' ')
 		buf.WriteString(p)
 		buf.WriteByte('\n')
 	}
-
-	return os.WriteFile(histFile, buf.Bytes(), 0o644)
+	return buf.Bytes()
 }

@@ -1,15 +1,15 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"sort"
+	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/shimmerglass/i3-workspace-manager/i3"
@@ -20,39 +20,42 @@ const winSpawnTimeout = 5 * time.Second
 func (m *Manager) OpenProject(project string) error {
 	log.Printf("opening project %s", project)
 
-	err := m.setupProject(project)
+	if m.SetupCommand != "" {
+		if _, err := runShell(m.SetupCommand, projectEnv(project)); err != nil {
+			return fmt.Errorf("setting up project %s: %w", project, err)
+		}
+	}
+
+	wks, err := m.managedWorkspaces()
+	if err != nil {
+		return err
+	}
+	tree, err := i3.Tree(m.sw)
 	if err != nil {
 		return err
 	}
 
 	for _, cfg := range m.Workspaces {
-		wk, ok, err := m.ProjectWks(project, cfg.Display)
-		if err != nil {
-			return err
-		}
-
-		if ok {
-			hasWindows := i3.WorkspaceHasWindows(m.sw, wk.Name)
-			if !wk.Visible || !hasWindows {
-				err := i3.SwitchToWorkspace(m.sw, wk.Name)
-				if err != nil {
-					return err
-				}
-			}
-			if !hasWindows {
-				err = m.openProjectDisplay(project, cfg, wk.Name)
-				if err != nil {
-					return err
-				}
-			}
-		} else {
-			wksName, err := m.openProjectCreateWks(project, cfg)
+		wk, ok := findProjectWks(wks, project, cfg.Display)
+		if !ok {
+			name, err := m.createProjectWks(project, cfg)
 			if err != nil {
 				return err
 			}
+			if err := m.spawnWindow(project, cfg, name); err != nil {
+				return err
+			}
+			continue
+		}
 
-			err = m.openProjectDisplay(project, cfg, wksName)
-			if err != nil {
+		hasWindows := i3.TreeWorkspaceHasWindows(tree, wk.Name)
+		if !wk.Visible || !hasWindows {
+			if err := i3.SwitchToWorkspace(m.sw, wk.Name); err != nil {
+				return err
+			}
+		}
+		if !hasWindows {
+			if err := m.spawnWindow(project, cfg, wk.Name); err != nil {
 				return err
 			}
 		}
@@ -61,176 +64,118 @@ func (m *Manager) OpenProject(project string) error {
 	return nil
 }
 
-func (m *Manager) openProjectCreateWks(project string, cfg Workspace) (string, error) {
-	wkn, err := m.nextWorkspacesID()
+func (m *Manager) createProjectWks(project string, cfg WorkspaceConfig) (string, error) {
+	num, err := m.nextWorkspaceNum()
 	if err != nil {
 		return "", err
 	}
-
-	userWksName, err := m.workspaceName(project)
+	label, err := m.workspaceLabel(project)
 	if err != nil {
 		return "", err
 	}
-	wksName := encodeWorkspaceName(userWksName, wksInfo{
-		Project: project,
-		Display: cfg.Display,
-	})
-	wksFullName := fmt.Sprintf("%d:%s", wkn, wksName)
+	name := formatWorkspaceName(num, label, wksInfo{Project: project, Display: cfg.Display})
 
-	// Assign the workspace to its output *before* creating it. In sway,
-	// `workspace <name> output <output>` only sets a placement rule for future
-	// creation; it does not move a workspace that already exists. Creating the
-	// workspace first (via SwitchToWorkspace) would place it on the currently
-	// focused output instead, which is racy: a previously opened app (e.g. VS
-	// Code) can steal focus back to another display before the next workspace
-	// is created, landing it on the wrong output. cfg.Display is a display role
-	// (e.g. "left"), so resolve it to a concrete output for the placement rule;
-	// the role itself is what gets encoded into the name for later reconciling.
 	output, err := m.resolveOutput(cfg.Display)
 	if err != nil {
 		return "", err
 	}
-	err = i3.AssignWorkspace(m.sw, wksFullName, output)
-	if err != nil {
-		return "", err
+	if output != "" {
+		if err := i3.AssignWorkspace(m.sw, name, output); err != nil {
+			return "", err
+		}
 	}
 
-	err = i3.SwitchToWorkspace(m.sw, wksFullName)
-	if err != nil {
+	if err := i3.SwitchToWorkspace(m.sw, name); err != nil {
 		return "", err
 	}
-
-	return wksFullName, nil
+	return name, nil
 }
 
-func (m *Manager) openProjectDisplay(project string, cfg Workspace, wksName string) error {
-	winEvts, done, err := i3.WinEvents()
+func (m *Manager) spawnWindow(project string, cfg WorkspaceConfig, wksName string) error {
+	events, stop, err := i3.WinEvents()
 	if err != nil {
 		return err
 	}
-	defer done()
+	defer stop()
 
-	err = m.runOpenCommand(project, cfg.Command)
-	if err != nil {
+	if err := spawn(cfg.Command, projectEnv(project)); err != nil {
 		return err
 	}
 
-	timeout := time.NewTimer(winSpawnTimeout)
-WaitWindow:
+	timeout := time.After(winSpawnTimeout)
 	for {
 		select {
-		case ev := <-winEvts:
-			log.Printf("i3 win event: %+v", ev)
-			if ev.Change == "new" {
-				// The window maps on whichever workspace currently has focus,
-				// which is racy: a slow app opened for a previous display (e.g.
-				// VS Code) can steal focus back before this window appears,
-				// landing it on the wrong workspace. Move the newly spawned
-				// container to its target workspace explicitly, by container id,
-				// so placement does not depend on focus.
-				err := i3.MoveContainerToWorkspace(m.sw, ev.Container.ID, wksName)
-				if err != nil {
-					return err
-				}
-				break WaitWindow
+		case ev := <-events:
+			if i3.IsNewTiledWindow(ev) {
+				return i3.MoveContainerToWorkspace(m.sw, ev.Container.ID, wksName)
 			}
-		case <-timeout.C:
+		case <-timeout:
 			return fmt.Errorf("command %q did not spawn any new window after %s", cfg.Command, winSpawnTimeout)
 		}
 	}
-
-	return nil
 }
 
-func (m *Manager) runOpenCommand(project, command string) error {
-	fmt.Println(command)
-	cmd := exec.Command("/bin/sh", "-c", command)
-	env := os.Environ()
-	out := &bytes.Buffer{}
-	cmd.Stderr = out
-	cmd.Stdout = out
-	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", project))
-	cmd.Env = env
-	err := cmd.Start()
-	if err != nil {
-		if out.Len() > 0 {
-			return fmt.Errorf("error opening workspace with command %s: %s", command, out.String())
-		}
-		return fmt.Errorf("error setting up workspace: %s", err)
-	}
-
-	return cmd.Process.Release()
-}
-
-func (m *Manager) setupProject(name string) error {
-	if m.SetupCommand == "" {
-		return nil
-	}
-
-	cmd := exec.Command("/bin/sh", "-c", m.SetupCommand)
-	env := os.Environ()
-	stderr := &bytes.Buffer{}
-	cmd.Stderr = stderr
-	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", name))
-	cmd.Env = env
-	err := cmd.Run()
-	if err != nil {
-		if stderr.Len() > 0 {
-			return errors.New(stderr.String())
-		}
-		return fmt.Errorf("error setting up project: %s", err)
-	}
-	return nil
-}
-
-func (m *Manager) workspaceName(name string) (string, error) {
+func (m *Manager) workspaceLabel(project string) (string, error) {
 	if m.WksNameCommand == "" {
-		return name, nil
+		return project, nil
 	}
 
-	cmd := exec.Command("/bin/sh", "-c", m.WksNameCommand)
-	env := os.Environ()
-	stderr := &bytes.Buffer{}
-	stdout := &bytes.Buffer{}
-	cmd.Stderr = stderr
-	cmd.Stdout = stdout
-	env = append(env, fmt.Sprintf("PROJECT_NAME=%s", name))
-	cmd.Env = env
-	err := cmd.Run()
+	out, err := runShell(m.WksNameCommand, projectEnv(project))
 	if err != nil {
-		if stderr.Len() > 0 {
-			return "", errors.New(stderr.String())
-		}
-		return "", fmt.Errorf("error getting workspace name: %s", err)
+		return "", fmt.Errorf("getting workspace name: %w", err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	if label := strings.TrimSpace(out); label != "" {
+		return label, nil
+	}
+	return project, nil
 }
 
 func (m *Manager) ProjectList() ([]string, error) {
-	cmd := exec.Command("/bin/sh", "-c", m.ListCommand)
-	stderr := &bytes.Buffer{}
-	stdout := &bytes.Buffer{}
-	cmd.Stderr = stderr
-	cmd.Stdout = stdout
-	err := cmd.Run()
+	if m.ListCommand == "" {
+		return nil, errors.New("-list-cmd is required")
+	}
+
+	out, err := runShell(m.ListCommand, nil)
 	if err != nil {
-		if stderr.Len() > 0 {
-			return nil, errors.New(stderr.String())
-		}
-		return nil, fmt.Errorf("error listing projects: %s", err)
+		return nil, fmt.Errorf("listing projects: %w", err)
 	}
 
-	res := []string{}
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		p := scanner.Text()
-		if p == "" {
-			continue
+	var res []string
+	for line := range strings.Lines(out) {
+		if p := strings.TrimSpace(line); p != "" {
+			res = append(res, p)
 		}
-		res = append(res, strings.TrimSpace(p))
 	}
+	slices.Sort(res)
+	return slices.Compact(res), nil
+}
 
-	sort.Strings(res)
+func projectEnv(project string) []string {
+	return append(os.Environ(), "PROJECT_NAME="+project)
+}
 
-	return res, nil
+func spawn(command string, env []string) error {
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting %q: %w", command, err)
+	}
+	return cmd.Process.Release()
+}
+
+func runShell(command string, env []string) (string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("/bin/sh", "-c", command)
+	cmd.Env = env
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%w: %s", err, msg)
+		}
+		return "", err
+	}
+	return stdout.String(), nil
 }

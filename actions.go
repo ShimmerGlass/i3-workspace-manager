@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
+	"slices"
 	"time"
 
 	"github.com/gen2brain/beeep"
@@ -13,11 +15,12 @@ import (
 	"github.com/shimmerglass/i3-workspace-manager/sel"
 )
 
-// ActionDaemon runs in the background and keeps project workspaces pinned to
-// their assigned display across output disconnect/reconnect. go-sway (v1.2.0)
-// cannot subscribe to "output" events, so they are consumed from swaymsg.
+const (
+	reconcileDelay = 500 * time.Millisecond
+	closeTimeout   = time.Second
+)
+
 func (m *Manager) ActionDaemon() error {
-	// Reconcile once at startup, in case displays changed while not running.
 	if err := m.reconcileDisplays(); err != nil {
 		log.Printf("initial display reconcile failed: %s", err)
 	}
@@ -31,22 +34,49 @@ func (m *Manager) ActionDaemon() error {
 		return err
 	}
 
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		log.Printf("output event: %s", scanner.Text())
-		// Give sway a moment to finish rearranging the connected output before
-		// moving workspaces back onto it.
-		time.Sleep(500 * time.Millisecond)
-		if err := m.reconcileDisplays(); err != nil {
-			log.Printf("display reconcile failed: %s", err)
+	lines := make(chan string)
+	var scanErr error
+	go func() {
+		defer close(lines)
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		scanErr = scanner.Err()
+	}()
+
+	debounce := time.NewTimer(reconcileDelay)
+	debounce.Stop()
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return errors.Join(errors.New("output event stream closed"), scanErr, cmd.Wait())
+			}
+			log.Printf("output event: %s", line)
+			debounce.Reset(reconcileDelay)
+		case <-debounce.C:
+			if err := m.reconcileDisplays(); err != nil {
+				log.Printf("display reconcile failed: %s", err)
+			}
 		}
 	}
+}
 
-	if err := scanner.Err(); err != nil {
+func (m *Manager) ActionOpenProject(project string) error {
+	projects, err := m.ProjectList()
+	if err != nil {
 		return err
 	}
+	if !slices.Contains(projects, project) {
+		return fmt.Errorf("unknown project %q", project)
+	}
 
-	return cmd.Wait()
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+	return m.openAndRecord(hist, project)
 }
 
 func (m *Manager) ActionOpen() error {
@@ -59,25 +89,13 @@ func (m *Manager) ActionOpen() error {
 	if err != nil {
 		return err
 	}
-
 	hist.Sort(projects)
 
 	project, err := sel.DoChoices(projects, "Open project", 0)
-	if err != nil {
+	if err != nil || project == "" {
 		return err
 	}
-	if project == "" {
-		return nil
-	}
-
-	err = m.OpenProject(project)
-	if err != nil {
-		return err
-	}
-
-	hist.Add(project)
-
-	return history.Write(hist)
+	return m.openAndRecord(hist, project)
 }
 
 func (m *Manager) ActionSelect() error {
@@ -85,7 +103,6 @@ func (m *Manager) ActionSelect() error {
 	if err != nil {
 		return err
 	}
-
 	if len(projects) == 0 {
 		return m.ActionOpen()
 	}
@@ -94,39 +111,19 @@ func (m *Manager) ActionSelect() error {
 	if err != nil {
 		return err
 	}
-
 	hist.Sort(projects)
 
-	current, ok, err := m.CurrentProject()
+	current, _, err := m.CurrentProject()
 	if err != nil {
 		return err
 	}
-
-	pos := 0
-	if ok {
-		for i, p := range projects {
-			if p == current {
-				pos = i
-			}
-		}
-	}
+	pos := max(slices.Index(projects, current), 0)
 
 	project, err := sel.DoChoices(projects, "Select project", pos)
-	if err != nil {
+	if err != nil || project == "" {
 		return err
 	}
-	if project == "" {
-		return nil
-	}
-
-	err = m.OpenProject(project)
-	if err != nil {
-		return err
-	}
-
-	hist.Add(project)
-
-	return history.Write(hist)
+	return m.openAndRecord(hist, project)
 }
 
 func (m *Manager) ActionHistoryGo(n int) error {
@@ -135,7 +132,7 @@ func (m *Manager) ActionHistoryGo(n int) error {
 		return err
 	}
 	if ok {
-		visible, err := m.IsProjectVisble(current)
+		visible, err := m.IsProjectVisible(current)
 		if err != nil {
 			return err
 		}
@@ -148,44 +145,25 @@ func (m *Manager) ActionHistoryGo(n int) error {
 	if err != nil {
 		return err
 	}
-
-	openProjects, err := m.OpenProjects()
+	open, err := m.OpenProjects()
 	if err != nil {
 		return err
 	}
-	if len(openProjects) == 0 {
-		return nil
-	}
 
-	selected := ""
+	size := len(hist.Projects)
 	pos := hist.Position
-Outer:
-	for i := 0; i < len(hist.Projects); i++ {
-		pos = (pos + n) % len(hist.Projects)
-		if pos < 0 {
-			pos = len(hist.Projects) - 1
+	for range size {
+		pos = ((pos+n)%size + size) % size
+		if !slices.Contains(open, hist.Projects[pos]) {
+			continue
 		}
-
-		for _, o := range openProjects {
-			if o == hist.Projects[pos] {
-				selected = o
-				break Outer
-			}
+		if err := m.OpenProject(hist.Projects[pos]); err != nil {
+			return err
 		}
+		hist.Position = pos
+		return history.Write(hist)
 	}
-
-	if selected == "" {
-		return nil
-	}
-
-	err = m.OpenProject(selected)
-	if err != nil {
-		return err
-	}
-
-	hist.Position = pos
-
-	return history.Write(hist)
+	return nil
 }
 
 func (m *Manager) ActionClose() error {
@@ -194,72 +172,93 @@ func (m *Manager) ActionClose() error {
 		return err
 	}
 
-	opened, err := m.OpenProjects()
+	open, err := m.OpenProjects()
+	if err != nil || len(open) == 0 {
+		return err
+	}
+	hist.Sort(open)
+
+	projects, err := sel.DoChoicesMulti(open, "Close projects", len(open)-1)
 	if err != nil {
 		return err
 	}
-	if len(opened) == 0 {
-		return nil
-	}
 
-	hist.Sort(opened)
-
-	projects, err := sel.DoChoicesMulti(opened, "Close projects", len(opened)-1)
+	wks, err := m.managedWorkspaces()
 	if err != nil {
 		return err
 	}
 
 	for _, project := range projects {
-		log.Printf("closing project %s", project)
-		workspaces, err := i3.Workspaces(m.sw)
-		if err != nil {
+		if err := m.closeProject(wks, project); err != nil {
 			return err
 		}
+		notify("i3wks", fmt.Sprintf("Closed project %s", project))
+	}
+	return nil
+}
 
-	NextWorkspace:
-		for _, wk := range workspaces {
-			wkInfo, ok, err := decodeWorkspaceName(wk)
-			if err != nil {
-				return err
-			}
-			if !ok || wkInfo.Project != project {
-				continue
-			}
+func (m *Manager) openAndRecord(hist *history.History, project string) error {
+	if err := m.OpenProject(project); err != nil {
+		return err
+	}
+	hist.Add(project)
+	return history.Write(hist)
+}
 
-			log.Printf("closing workspace %s", wk.Name)
-
-			winEvts, done, err := i3.WinEvents()
-			if err != nil {
-				return err
-			}
-
-			err = i3.CloseWorkspace(m.sw, wk.Num)
-			if err != nil {
-				done()
-				return err
-			}
-
-			timeout := time.After(time.Second)
-			for {
-				select {
-				case <-winEvts:
-					if !i3.WorkspaceHasWindows(m.sw, wk.Name) {
-						done()
-						continue NextWorkspace
-					}
-				case <-timeout:
-					done()
-					if i3.WorkspaceHasWindows(m.sw, wk.Name) {
-						i3.SwitchToWorkspace(m.sw, wk.Name)
-						return fmt.Errorf("Some windows could not be closed for project %s", project)
-					}
-					continue NextWorkspace
-				}
-			}
+func (m *Manager) closeProject(wks []managedWks, project string) error {
+	log.Printf("closing project %s", project)
+	for _, w := range wks {
+		if w.Project != project {
+			continue
 		}
+		if err := m.closeWorkspace(w.Workspace); err != nil {
+			return fmt.Errorf("closing project %s: %w", project, err)
+		}
+	}
+	return nil
+}
 
-		beeep.Notify("i3wks", fmt.Sprintf("Closed project %s", project), "")
+func (m *Manager) closeWorkspace(wk i3.Workspace) error {
+	hasWindows, err := i3.WorkspaceHasWindows(m.sw, wk.Name)
+	if err != nil || !hasWindows {
+		return err
 	}
 
-	return nil
+	log.Printf("closing workspace %s", wk.Name)
+	events, stop, err := i3.WinEvents()
+	if err != nil {
+		return err
+	}
+	defer stop()
+
+	if err := i3.CloseWorkspace(m.sw, wk.Num); err != nil {
+		return err
+	}
+
+	timeout := time.After(closeTimeout)
+	for {
+		select {
+		case <-events:
+		case <-timeout:
+			hasWindows, err := i3.WorkspaceHasWindows(m.sw, wk.Name)
+			if err != nil || !hasWindows {
+				return err
+			}
+			return errors.Join(
+				fmt.Errorf("some windows of workspace %s could not be closed", wk.Name),
+				i3.SwitchToWorkspace(m.sw, wk.Name),
+			)
+		}
+
+		hasWindows, err := i3.WorkspaceHasWindows(m.sw, wk.Name)
+		if err != nil || !hasWindows {
+			return err
+		}
+	}
+}
+
+func notify(title, msg string) {
+	if err := beeep.Notify(title, msg, ""); err != nil {
+		log.Printf("notification failed: %s", err)
+	}
 }

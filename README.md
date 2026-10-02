@@ -14,6 +14,8 @@ The following commands are available :
 | `-select`       | switch to an already opened project                  |
 | `-prev / -next` | quick switch to previous / next project              |
 | `-close`        | close project windows and switch to previous project |
+| `-project NAME` | open the named project, without the selector         |
+| `-daemon`       | keep project workspaces pinned to their display (sway) |
 
 ## Project list
 
@@ -34,6 +36,12 @@ And an editor on display 2 :
 ```
 -wk 'DVI-I-1:code ~/dev/$PROJECT_NAME'
 ```
+
+The display part of `-wk` is either an output name (e.g. `DP-1`) or a role: `left` / `right` resolve to the leftmost / rightmost active output, which survives connectors swapping order.
+
+## Workspace name
+
+`-wksname-cmd` prints the label shown for a project's workspaces, with $PROJECT_NAME as env var. Defaults to the project name.
 
 ## Setup command
 

@@ -2,101 +2,108 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"log/syslog"
 	"os"
+	"path/filepath"
 	"strings"
 
-	"github.com/gen2brain/beeep"
 	"github.com/joshuarubin/go-sway"
 )
 
 type Manager struct {
-	sw sway.Client
+	sw         sway.Client
+	nextWksNum int64
 
-	Workspaces     []Workspace
+	Workspaces     []WorkspaceConfig
 	SetupCommand   string
 	ListCommand    string
 	WksNameCommand string
 }
 
-type Workspace struct {
-	Command string
+type WorkspaceConfig struct {
 	Display string
+	Command string
 }
 
-func parseWorkspaces(flags arrayFlags) []Workspace {
-	res := []Workspace{}
+func parseWorkspaces(flags arrayFlags) ([]WorkspaceConfig, error) {
+	var res []WorkspaceConfig
 	for _, f := range flags {
-		i := strings.IndexByte(f, ':')
-		if i < 0 {
-			log.Fatalf("bad workspace flag %s", f)
+		display, command, ok := strings.Cut(f, ":")
+		if !ok || display == "" || command == "" {
+			return nil, fmt.Errorf("bad workspace flag %q, expected display:command", f)
 		}
-
-		res = append(res, Workspace{
-			Display: f[:i],
-			Command: f[i+1:],
-		})
+		res = append(res, WorkspaceConfig{Display: display, Command: command})
 	}
-
-	return res
+	return res, nil
 }
 
 func main() {
-	logwriter, e := syslog.New(syslog.LOG_NOTICE, os.Args[0])
-	if e == nil {
-		log.SetOutput(logwriter)
+	if w, err := syslog.New(syslog.LOG_NOTICE, filepath.Base(os.Args[0])); err == nil {
+		log.SetOutput(w)
 	}
 
-	setupCommand := flag.String("setup-cmd", "", "Setup command for project")
-	listCommand := flag.String("list-cmd", "", "Setup command for listing project")
-	wkNameCommand := flag.String("wksname-cmd", "", "Command to set the names of each workspace")
-	var workspaces arrayFlags
-	flag.Var(&workspaces, "wk", "Workspace: `display_name:command`")
+	if err := run(); err != nil {
+		log.Print(err)
+		fmt.Fprintln(os.Stderr, err)
+		notify("i3wks error", err.Error())
+		os.Exit(1)
+	}
+}
 
-	modeOpen := flag.Bool("open", false, "")
-	modeSelect := flag.Bool("select", false, "")
-	modePrev := flag.Bool("prev", false, "")
-	modeNext := flag.Bool("next", false, "")
-	modeClose := flag.Bool("close", false, "")
-	modeDaemon := flag.Bool("daemon", false, "")
+func run() error {
+	setupCommand := flag.String("setup-cmd", "", "command run before opening a project")
+	listCommand := flag.String("list-cmd", "", "command listing projects, one per line")
+	wksNameCommand := flag.String("wksname-cmd", "", "command printing the workspace label for a project")
+	var workspaces arrayFlags
+	flag.Var(&workspaces, "wk", "workspace `display:command`, display is left, right or an output name (repeatable)")
+
+	modeProject := flag.String("project", "", "open the named project, without the selector")
+	modeOpen := flag.Bool("open", false, "open a project from the project list")
+	modeSelect := flag.Bool("select", false, "switch to an already opened project")
+	modePrev := flag.Bool("prev", false, "switch to the previous project")
+	modeNext := flag.Bool("next", false, "switch to the next project")
+	modeClose := flag.Bool("close", false, "close projects")
+	modeDaemon := flag.Bool("daemon", false, "keep project workspaces pinned to their display")
 	flag.Parse()
 
-	fmt.Println(workspaces)
+	wks, err := parseWorkspaces(workspaces)
+	if err != nil {
+		return err
+	}
 
 	sw, err := sway.New(context.Background())
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	m := &Manager{
 		sw:             sw,
+		Workspaces:     wks,
 		SetupCommand:   *setupCommand,
 		ListCommand:    *listCommand,
-		WksNameCommand: *wkNameCommand,
-		Workspaces:     parseWorkspaces(workspaces),
+		WksNameCommand: *wksNameCommand,
 	}
 
 	switch {
+	case *modeProject != "":
+		return m.ActionOpenProject(*modeProject)
 	case *modeOpen:
-		err = m.ActionOpen()
+		return m.ActionOpen()
 	case *modeSelect:
-		err = m.ActionSelect()
+		return m.ActionSelect()
 	case *modePrev:
-		err = m.ActionHistoryGo(1)
+		return m.ActionHistoryGo(1)
 	case *modeNext:
-		err = m.ActionHistoryGo(-1)
+		return m.ActionHistoryGo(-1)
 	case *modeClose:
-		err = m.ActionClose()
+		return m.ActionClose()
 	case *modeDaemon:
-		err = m.ActionDaemon()
+		return m.ActionDaemon()
 	default:
-		err = fmt.Errorf("specify one of -open, -select, -prev, -next, -close, -daemon")
-	}
-
-	if err != nil {
-		beeep.Notify("i3wks error", err.Error(), "")
+		return errors.New("specify one of -project, -open, -select, -prev, -next, -close, -daemon")
 	}
 }

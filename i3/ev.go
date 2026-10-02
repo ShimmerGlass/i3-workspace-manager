@@ -2,80 +2,63 @@ package i3
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"time"
 
 	"github.com/joshuarubin/go-sway"
 )
 
-var _ sway.EventHandler = &swayEventHandler{}
+const subscribeTimeout = 2 * time.Second
 
-type swayEventHandler struct {
-	winCb func(sway.WindowEvent)
+type WindowEvent = sway.WindowEvent
+
+type winHandler struct {
+	sway.EventHandler
+	ctx    context.Context
+	events chan WindowEvent
+	ready  chan struct{}
 }
 
-// BarConfigUpdate implements [sway.EventHandler].
-func (e *swayEventHandler) BarConfigUpdate(context.Context, sway.BarConfigUpdateEvent) {
-
+func (h *winHandler) Tick(_ context.Context, ev sway.TickEvent) {
+	if ev.First {
+		close(h.ready)
+	}
 }
 
-// BarStateUpdate implements [sway.EventHandler].
-func (e *swayEventHandler) BarStateUpdate(context.Context, sway.BarStateUpdateEvent) {
-
+func (h *winHandler) Window(_ context.Context, ev WindowEvent) {
+	select {
+	case h.events <- ev:
+	case <-h.ctx.Done():
+	}
 }
 
-// BarStatusUpdate implements [sway.EventHandler].
-func (e *swayEventHandler) BarStatusUpdate(context.Context, sway.BarStatusUpdateEvent) {
-
-}
-
-// Binding implements [sway.EventHandler].
-func (e *swayEventHandler) Binding(context.Context, sway.BindingEvent) {
-
-}
-
-// Input implements [sway.EventHandler].
-func (e *swayEventHandler) Input(context.Context, sway.InputEvent) {
-
-}
-
-// Mode implements [sway.EventHandler].
-func (e *swayEventHandler) Mode(context.Context, sway.ModeEvent) {
-
-}
-
-// Shutdown implements [sway.EventHandler].
-func (e *swayEventHandler) Shutdown(context.Context, sway.ShutdownEvent) {
-
-}
-
-// Tick implements [sway.EventHandler].
-func (e *swayEventHandler) Tick(context.Context, sway.TickEvent) {
-
-}
-
-// Window implements [sway.EventHandler].
-func (e *swayEventHandler) Window(_ context.Context, ev sway.WindowEvent) {
-	e.winCb(ev)
-}
-
-// Workspace implements [sway.EventHandler].
-func (e *swayEventHandler) Workspace(context.Context, sway.WorkspaceEvent) {
-
-}
-
-func WinEvents() (chan sway.WindowEvent, func(), error) {
+func WinEvents() (<-chan WindowEvent, func(), error) {
 	ctx, cancel := context.WithCancel(context.Background())
-
-	res := make(chan sway.WindowEvent, 100)
-
-	eh := &swayEventHandler{
-		winCb: func(we sway.WindowEvent) {
-			res <- we
-		},
+	h := &winHandler{
+		EventHandler: sway.NoOpEventHandler(),
+		ctx:          ctx,
+		events:       make(chan WindowEvent, 100),
+		ready:        make(chan struct{}),
 	}
 
+	errc := make(chan error, 1)
 	go func() {
-		sway.Subscribe(ctx, eh, sway.EventTypeWindow)
+		errc <- sway.Subscribe(ctx, h, sway.EventTypeWindow, sway.EventTypeTick)
 	}()
 
-	return res, cancel, nil
+	select {
+	case <-h.ready:
+		return h.events, cancel, nil
+	case err := <-errc:
+		cancel()
+		return nil, nil, fmt.Errorf("subscribing to window events: %w", err)
+	case <-time.After(subscribeTimeout):
+		cancel()
+		return nil, nil, errors.New("timed out subscribing to window events")
+	}
+}
+
+func IsNewTiledWindow(ev WindowEvent) bool {
+	return ev.Change == sway.WindowNew && ev.Container.Type != sway.NodeFloatingCon
 }

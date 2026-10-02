@@ -2,11 +2,14 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"log"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/eknkc/basex"
@@ -15,21 +18,17 @@ import (
 
 const (
 	workspaceStart = 20
+	metaSeparator  = "\u200B"
 )
 
-var encoding *basex.Encoding
+var encoding = mustEncoding("\uFEFF\u200C\u200D\u2060")
 
-func init() {
-	// The metadata is stored in the workspace name using zero-width code points
-	// so it stays invisible in bars and window titles. A larger alphabet means
-	// fewer characters per byte: base 4 emits 4 chars/byte instead of the 8 a
-	// base-2 alphabet would. All four are reliably zero-width and distinct from
-	// the "\u200B" separator used below.
-	e, err := basex.NewEncoding("\uFEFF\u200C\u200D\u2060")
+func mustEncoding(alphabet string) *basex.Encoding {
+	e, err := basex.NewEncoding(alphabet)
 	if err != nil {
 		panic(err)
 	}
-	encoding = e
+	return e
 }
 
 type wksInfo struct {
@@ -37,44 +36,54 @@ type wksInfo struct {
 	Display string
 }
 
-func encodeWorkspaceName(name string, info wksInfo) string {
+type managedWks struct {
+	i3.Workspace
+	wksInfo
+}
+
+func encodeWorkspaceName(label string, info wksInfo) string {
 	buf := &bytes.Buffer{}
 	writeLenString(buf, info.Project)
 	writeLenString(buf, info.Display)
-	return name + "\u200B" + encoding.Encode(buf.Bytes())
+	return label + metaSeparator + encoding.Encode(buf.Bytes())
 }
 
-func decodeWorkspaceName(wk i3.Workspace) (wksInfo, bool, error) {
-	res := wksInfo{}
-
-	parts := strings.Split(wk.Name, "\u200B")
-	if len(parts) != 2 {
-		return res, false, nil
+func parseWorkspaceName(name string) (wksInfo, bool, error) {
+	_, meta, ok := strings.Cut(name, metaSeparator)
+	if !ok || strings.Contains(meta, metaSeparator) {
+		return wksInfo{}, false, nil
 	}
 
-	bin, err := encoding.Decode(parts[1])
+	bin, err := encoding.Decode(meta)
 	if err != nil {
-		return res, false, err
+		return wksInfo{}, false, err
 	}
 
 	buf := bytes.NewBuffer(bin)
+	var res wksInfo
 	if res.Project, err = readLenString(buf); err != nil {
-		return res, false, err
+		return wksInfo{}, false, err
 	}
 	if res.Display, err = readLenString(buf); err != nil {
-		return res, false, err
+		return wksInfo{}, false, err
+	}
+	if buf.Len() != 0 {
+		return wksInfo{}, false, errors.New("trailing data")
 	}
 
 	return res, true, nil
 }
 
-// writeLenString writes s as a varint length prefix followed by its raw bytes.
-// This is a compact, self-describing alternative to gob, which would emit its
-// type descriptor on every call and dwarf the few bytes of actual payload.
+func decodeWorkspaceName(name string) (wksInfo, bool) {
+	info, ok, err := parseWorkspaceName(name)
+	if err != nil {
+		log.Printf("ignoring workspace %q with invalid metadata: %s", name, err)
+	}
+	return info, ok
+}
+
 func writeLenString(buf *bytes.Buffer, s string) {
-	var l [binary.MaxVarintLen64]byte
-	n := binary.PutUvarint(l[:], uint64(len(s)))
-	buf.Write(l[:n])
+	buf.Write(binary.AppendUvarint(nil, uint64(len(s))))
 	buf.WriteString(s)
 }
 
@@ -83,242 +92,231 @@ func readLenString(buf *bytes.Buffer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	s := make([]byte, n)
-	if _, err := io.ReadFull(buf, s); err != nil {
-		return "", err
+	if n > uint64(buf.Len()) {
+		return "", io.ErrUnexpectedEOF
 	}
-	return string(s), nil
+	return string(buf.Next(int(n))), nil
 }
 
-func (m *Manager) ProjectWks(project, display string) (i3.Workspace, bool, error) {
-	wks, err := i3.Workspaces(m.sw)
-	if err != nil {
-		return i3.Workspace{}, false, err
-	}
-
+func managedWorkspaces(wks []i3.Workspace) []managedWks {
+	var res []managedWks
 	for _, w := range wks {
-		wkInfo, ok, err := decodeWorkspaceName(w)
-		if err != nil {
-			return i3.Workspace{}, false, err
+		if info, ok := decodeWorkspaceName(w.Name); ok {
+			res = append(res, managedWks{Workspace: w, wksInfo: info})
 		}
-		if !ok {
-			continue
-		}
-
-		if wkInfo.Project != project {
-			continue
-		}
-
-		if wkInfo.Display != display {
-			continue
-		}
-
-		return w, true, nil
 	}
-
-	return i3.Workspace{}, false, nil
+	return res
 }
 
-func (m *Manager) CurrentProject() (string, bool, error) {
-	wks, err := i3.Workspaces(m.sw)
-	if err != nil {
-		return "", false, err
-	}
-
-	for _, w := range wks {
-		if !w.Visible {
-			continue
-		}
-
-		wkInfo, ok, err := decodeWorkspaceName(w)
-		if err != nil {
-			return "", false, err
-		}
-		if ok {
-			return wkInfo.Project, true, nil
-		}
-	}
-
-	return "", false, nil
-}
-
-func (m *Manager) IsProjectVisble(project string) (bool, error) {
-	i := 0
-	wks, err := i3.Workspaces(m.sw)
-	if err != nil {
-		return false, err
-	}
-	for _, w := range wks {
-		if !w.Visible {
-			continue
-		}
-
-		wkInfo, ok, err := decodeWorkspaceName(w)
-		if err != nil {
-			return false, err
-		}
-
-		if ok && wkInfo.Project == project {
-			i++
-		}
-	}
-
-	return i == len(m.Workspaces), nil
-}
-
-func (m *Manager) OpenProjects() ([]string, error) {
-	pmap := map[string]bool{}
-
+func (m *Manager) managedWorkspaces() ([]managedWks, error) {
 	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return nil, err
 	}
-
-	for _, w := range wks {
-		if !i3.WorkspaceHasWindows(m.sw, w.Name) {
-			continue
-		}
-
-		wkInfo, ok, err := decodeWorkspaceName(w)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			pmap[wkInfo.Project] = true
-		}
-	}
-
-	projects := []string{}
-	for k := range pmap {
-		projects = append(projects, k)
-	}
-
-	sort.Strings(projects)
-
-	return projects, nil
+	return managedWorkspaces(wks), nil
 }
 
-// resolveOutput maps a display role stored in a workspace name to the name of a
-// currently connected output. The roles "left" and "right" resolve to the
-// leftmost and rightmost active output by position, so pinning follows the
-// physical layout even when the two identical panels bind to their connectors
-// in a different order at boot (or after sway-swap-monitors flips them). For
-// backward compatibility a role that is itself the name of a connected output
-// (e.g. "DP-2") is used verbatim. Returns "" when no output can satisfy the
-// role (e.g. the target display is disconnected).
+func findProjectWks(wks []managedWks, project, display string) (managedWks, bool) {
+	for _, w := range wks {
+		if w.Project == project && w.Display == display {
+			return w, true
+		}
+	}
+	return managedWks{}, false
+}
+
+func (m *Manager) CurrentProject() (string, bool, error) {
+	wks, err := m.managedWorkspaces()
+	if err != nil {
+		return "", false, err
+	}
+	project, ok := currentProject(wks)
+	return project, ok, nil
+}
+
+func currentProject(wks []managedWks) (string, bool) {
+	for _, w := range wks {
+		if w.Focused {
+			return w.Project, true
+		}
+	}
+	for _, w := range wks {
+		if w.Visible {
+			return w.Project, true
+		}
+	}
+	return "", false
+}
+
+func (m *Manager) IsProjectVisible(project string) (bool, error) {
+	wks, err := m.managedWorkspaces()
+	if err != nil {
+		return false, err
+	}
+	return projectVisible(wks, project, len(m.Workspaces)), nil
+}
+
+func projectVisible(wks []managedWks, project string, expected int) bool {
+	count := 0
+	shown := map[string]bool{}
+	for _, w := range wks {
+		if w.Project != project {
+			continue
+		}
+		count++
+		shown[w.Output] = shown[w.Output] || w.Visible
+	}
+
+	if count == 0 || count != expected {
+		return false
+	}
+	for _, ok := range shown {
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func (m *Manager) OpenProjects() ([]string, error) {
+	wks, err := m.managedWorkspaces()
+	if err != nil {
+		return nil, err
+	}
+	tree, err := i3.Tree(m.sw)
+	if err != nil {
+		return nil, err
+	}
+
+	open := map[string]bool{}
+	for _, w := range wks {
+		if i3.TreeWorkspaceHasWindows(tree, w.Name) {
+			open[w.Project] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(open)), nil
+}
+
 func (m *Manager) resolveOutput(role string) (string, error) {
 	outputs, err := i3.Outputs(m.sw)
 	if err != nil {
 		return "", err
 	}
+	return resolveRole(activeOutputsSorted(outputs), role), nil
+}
 
-	active := []i3.Output{}
-	for _, o := range outputs {
-		if o.Active {
-			active = append(active, o)
-		}
-	}
-	// Backward compatibility: role given as a literal output name.
+func activeOutputsSorted(outputs []i3.Output) []i3.Output {
+	active := slices.DeleteFunc(slices.Clone(outputs), func(o i3.Output) bool { return !o.Active })
+	slices.SortFunc(active, func(a, b i3.Output) int { return cmp.Compare(a.Rect.X, b.Rect.X) })
+	return active
+}
+
+func resolveRole(active []i3.Output, role string) string {
 	for _, o := range active {
 		if o.Name == role {
-			return o.Name, nil
+			return o.Name
 		}
 	}
 	if len(active) == 0 {
-		return "", nil
+		return ""
 	}
 
-	sort.Slice(active, func(i, j int) bool {
-		return active[i].Rect.X < active[j].Rect.X
-	})
 	switch role {
 	case "left":
-		return active[0].Name, nil
+		return active[0].Name
 	case "right":
-		return active[len(active)-1].Name, nil
+		return active[len(active)-1].Name
 	default:
-		return "", fmt.Errorf("unknown display role %q", role)
+		return ""
 	}
 }
 
-// reconcileDisplays moves every project workspace back to the output that
-// satisfies the display role encoded in its name. When a display disconnects,
-// sway evacuates its workspaces to a surviving output and does not move them
-// back on reconnect; this restores them. It also runs after output position
-// changes (e.g. sway-swap-monitors), re-pinning role-based workspaces so they
-// follow the panel that is now leftmost/rightmost. Workspaces whose role cannot
-// currently be resolved are left where they are.
 func (m *Manager) reconcileDisplays() error {
 	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return err
 	}
-
-	focused := ""
-	for _, w := range wks {
-		if w.Focused {
-			focused = w.Name
-		}
+	outputs, err := i3.Outputs(m.sw)
+	if err != nil {
+		return err
 	}
+	active := activeOutputsSorted(outputs)
 
+	var errs []error
 	moved := false
-	for _, w := range wks {
-		info, ok, err := decodeWorkspaceName(w)
-		if err != nil {
-			return err
-		}
-		if !ok || info.Display == "" {
+	for _, w := range managedWorkspaces(wks) {
+		if w.Display == "" {
 			continue
 		}
 
-		target, err := m.resolveOutput(info.Display)
-		if err != nil {
-			log.Printf("cannot resolve display role %q for workspace %s: %s", info.Display, w.Name, err)
-			continue
-		}
-		// Role unsatisfiable (display disconnected), or already there.
+		target := resolveRole(active, w.Display)
 		if target == "" || w.Output == target {
 			continue
 		}
 
-		log.Printf("re-pinning workspace %s to %s (role %q, currently on %s)", w.Name, target, info.Display, w.Output)
-		// A workspace can only be moved to an output while focused, so switch to
-		// it first, then move the now-focused workspace.
+		log.Printf("re-pinning workspace %s to %s (role %q, currently on %s)", w.Name, target, w.Display, w.Output)
 		if err := i3.SwitchToWorkspace(m.sw, w.Name); err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		if err := i3.MoveCurrentWorkspace(m.sw, target); err != nil {
-			return err
+			errs = append(errs, err)
+			continue
 		}
 		moved = true
 	}
 
-	// Restore the workspace that was focused before we started shuffling.
-	if moved && focused != "" {
-		return i3.SwitchToWorkspace(m.sw, focused)
+	if moved {
+		errs = append(errs, m.restoreVisible(wks))
 	}
-
-	return nil
+	return errors.Join(errs...)
 }
 
-var minWorkspace = int64(workspaceStart)
+func (m *Manager) restoreVisible(before []i3.Workspace) error {
+	current, err := i3.Workspaces(m.sw)
+	if err != nil {
+		return err
+	}
+	exists := map[string]bool{}
+	for _, w := range current {
+		exists[w.Name] = true
+	}
 
-func (m *Manager) nextWorkspacesID() (int64, error) {
+	var errs []error
+	focused := ""
+	for _, w := range before {
+		switch {
+		case w.Focused:
+			focused = w.Name
+		case w.Visible && exists[w.Name]:
+			errs = append(errs, i3.SwitchToWorkspace(m.sw, w.Name))
+		}
+	}
+	if focused != "" {
+		errs = append(errs, i3.SwitchToWorkspace(m.sw, focused))
+	}
+	return errors.Join(errs...)
+}
+
+func (m *Manager) nextWorkspaceNum() (int64, error) {
 	wks, err := i3.Workspaces(m.sw)
 	if err != nil {
 		return 0, err
 	}
 
-	usedNums := map[int64]bool{}
+	used := map[int64]bool{}
 	for _, w := range wks {
-		usedNums[w.Num] = true
+		used[w.Num] = true
 	}
 
-	for n := minWorkspace; ; n++ {
-		if usedNums[n] {
-			continue
-		}
-		minWorkspace = n + 1
-		return n, nil
+	n := max(m.nextWksNum, workspaceStart)
+	for used[n] {
+		n++
 	}
+	m.nextWksNum = n + 1
+	return n, nil
+}
+
+func formatWorkspaceName(num int64, label string, info wksInfo) string {
+	return fmt.Sprintf("%d:%s", num, encodeWorkspaceName(label, info))
 }

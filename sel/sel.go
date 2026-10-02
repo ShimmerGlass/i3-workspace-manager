@@ -1,57 +1,54 @@
 package sel
 
 import (
-	"bufio"
 	"bytes"
-	"os"
+	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
 
 func DoChoices(choices []string, prompt string, pos int) (string, error) {
-	in := &bytes.Buffer{}
-	in.WriteString(strings.Join(choices, "\n"))
-
-	out := &bytes.Buffer{}
-	cmd := exec.Command(
-		"rofi",
-		"-dmenu",
-		"-matching", "fuzzy",
-		"-mesg", prompt,
-		"-selected-row", strconv.Itoa(pos),
-	)
-	cmd.Stdin = in
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = out
-
-	cmd.Run()
-	return strings.TrimSpace(out.String()), nil
+	out, err := rofi(choices, prompt, pos)
+	return strings.TrimSpace(out), err
 }
 
 func DoChoicesMulti(choices []string, prompt string, pos int) ([]string, error) {
-	in := &bytes.Buffer{}
-	in.WriteString(strings.Join(choices, "\n"))
+	out, err := rofi(choices, prompt, pos, "-multi-select")
+	if err != nil {
+		return nil, err
+	}
 
-	out := &bytes.Buffer{}
-	cmd := exec.Command(
-		"rofi",
+	var res []string
+	for line := range strings.Lines(out) {
+		if line = strings.TrimSpace(line); line != "" {
+			res = append(res, line)
+		}
+	}
+	return res, nil
+}
+
+func rofi(choices []string, prompt string, pos int, extra ...string) (string, error) {
+	args := append([]string{
 		"-dmenu",
 		"-matching", "fuzzy",
 		"-mesg", prompt,
 		"-selected-row", strconv.Itoa(pos),
-		"-multi-select",
-	)
-	cmd.Stdin = in
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = out
+	}, extra...)
 
-	cmd.Run()
+	var stdout, stderr bytes.Buffer
+	cmd := exec.Command("rofi", args...)
+	cmd.Stdin = strings.NewReader(strings.Join(choices, "\n"))
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
-	res := []string{}
-	scanner := bufio.NewScanner(out)
-	for scanner.Scan() {
-		res = append(res, strings.TrimSpace(scanner.Text()))
+	err := cmd.Run()
+	if exitErr, ok := errors.AsType[*exec.ExitError](err); ok && exitErr.ExitCode() == 1 {
+		return "", nil
 	}
-	return res, nil
+	if err != nil {
+		return "", fmt.Errorf("rofi: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
