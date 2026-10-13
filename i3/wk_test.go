@@ -11,6 +11,11 @@ func view() *Node {
 	return &Node{Type: sway.NodeCon, PID: &pid}
 }
 
+func floatingView() *Node {
+	pid := uint32(1)
+	return &Node{Type: sway.NodeFloatingCon, PID: &pid}
+}
+
 func workspace(name string, nodes, floating []*Node) *Node {
 	return &Node{
 		Type: sway.NodeRoot,
@@ -32,7 +37,9 @@ func TestTreeWorkspaceHasWindows(t *testing.T) {
 		{"empty", workspace("w", nil, nil), false},
 		{"direct view", workspace("w", []*Node{view()}, nil), true},
 		{"view in second split", workspace("w", []*Node{split(), split(view())}, nil), true},
-		{"floating only", workspace("w", nil, []*Node{{Type: sway.NodeFloatingCon}}), false},
+		{"floating container without view", workspace("w", nil, []*Node{{Type: sway.NodeFloatingCon}}), false},
+		{"floating view", workspace("w", nil, []*Node{floatingView()}), true},
+		{"view in floating split", workspace("w", nil, []*Node{{Type: sway.NodeFloatingCon, Nodes: []*Node{view()}}}), true},
 		{"empty splits", workspace("w", []*Node{split(), split()}, nil), false},
 	}
 	for _, tt := range tests {

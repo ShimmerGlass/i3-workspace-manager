@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 
 	"github.com/joshuarubin/go-sway"
@@ -76,14 +77,14 @@ func TreeWorkspaceHasWindows(tree *Node, name string) bool {
 	if wk == nil {
 		return false
 	}
-	for _, c := range wk.Nodes {
-		if c.TraverseNodes(isTiledView) != nil {
+	for _, c := range slices.Concat(wk.Nodes, wk.FloatingNodes) {
+		if c.TraverseNodes(isView) != nil {
 			return true
 		}
 	}
 	return false
 }
 
-func isTiledView(n *Node) bool {
-	return n.Type == sway.NodeCon && n.PID != nil
+func isView(n *Node) bool {
+	return (n.Type == sway.NodeCon || n.Type == sway.NodeFloatingCon) && n.PID != nil
 }

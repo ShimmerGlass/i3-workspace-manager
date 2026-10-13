@@ -99,3 +99,20 @@ func TestCurrentProjectPrefersFocused(t *testing.T) {
 		t.Fatalf("got %q %v, want b", got, ok)
 	}
 }
+
+func TestMostRecent(t *testing.T) {
+	tests := []struct {
+		history, open []string
+		want          string
+		ok            bool
+	}{
+		{[]string{"a", "b", "c"}, []string{"c", "b"}, "b", true},
+		{[]string{"a", "b"}, []string{"z"}, "", false},
+		{nil, []string{"a"}, "", false},
+	}
+	for _, tt := range tests {
+		if got, ok := mostRecent(tt.history, tt.open); got != tt.want || ok != tt.ok {
+			t.Errorf("mostRecent(%v, %v) = %q %v, want %q %v", tt.history, tt.open, got, ok, tt.want, tt.ok)
+		}
+	}
+}

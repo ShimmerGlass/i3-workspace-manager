@@ -30,12 +30,17 @@ func DoChoicesMulti(choices []string, prompt string, pos int) ([]string, error) 
 }
 
 func rofi(choices []string, prompt string, pos int, extra ...string) (string, error) {
-	args := append([]string{
+	mesg, placeholder := splitPrompt(prompt)
+	args := []string{
 		"-dmenu",
 		"-matching", "fuzzy",
-		"-mesg", prompt,
+		"-theme-str", fmt.Sprintf("entry { placeholder: %s; }", rasiString(placeholder)),
 		"-selected-row", strconv.Itoa(pos),
-	}, extra...)
+	}
+	if mesg != "" {
+		args = append(args, "-mesg", mesg)
+	}
+	args = append(args, extra...)
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command("rofi", args...)
@@ -51,4 +56,26 @@ func rofi(choices []string, prompt string, pos int, extra ...string) (string, er
 		return "", fmt.Errorf("rofi: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+func Prompt(prompt string) (string, error) {
+	return DoChoices(nil, prompt, 0)
+}
+
+func Confirm(prompt string) (bool, error) {
+	out, err := DoChoices([]string{"no", "yes"}, prompt, 0)
+	return out == "yes", err
+}
+
+func splitPrompt(prompt string) (mesg, placeholder string) {
+	prompt = strings.TrimSpace(prompt)
+	i := strings.LastIndexByte(prompt, '\n')
+	if i < 0 {
+		return "", prompt
+	}
+	return strings.TrimSpace(prompt[:i]), strings.TrimSpace(prompt[i+1:])
+}
+
+func rasiString(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }

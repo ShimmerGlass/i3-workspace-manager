@@ -183,6 +183,10 @@ func (m *Manager) ActionClose() error {
 		return err
 	}
 
+	current, _, err := m.CurrentProject()
+	if err != nil {
+		return err
+	}
 	wks, err := m.managedWorkspaces()
 	if err != nil {
 		return err
@@ -194,7 +198,31 @@ func (m *Manager) ActionClose() error {
 		}
 		notify("i3wks", fmt.Sprintf("Closed project %s", project))
 	}
+
+	if slices.Contains(projects, current) {
+		return m.returnToRecent(hist)
+	}
 	return nil
+}
+
+func (m *Manager) returnToRecent(hist *history.History) error {
+	open, err := m.OpenProjects()
+	if err != nil {
+		return err
+	}
+	if project, ok := mostRecent(hist.Projects, open); ok {
+		return m.openAndRecord(hist, project)
+	}
+	return nil
+}
+
+func mostRecent(history, open []string) (string, bool) {
+	for _, p := range history {
+		if slices.Contains(open, p) {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 func (m *Manager) openAndRecord(hist *history.History, project string) error {

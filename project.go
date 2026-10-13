@@ -134,12 +134,18 @@ func (m *Manager) ProjectList() ([]string, error) {
 	if m.ListCommand == "" {
 		return nil, errors.New("-list-cmd is required")
 	}
+	return listProjects(m.ListCommand)
+}
 
-	out, err := runShell(m.ListCommand, nil)
+func listProjects(command string) ([]string, error) {
+	out, err := runShell(command, nil)
 	if err != nil {
 		return nil, fmt.Errorf("listing projects: %w", err)
 	}
+	return parseLines(out), nil
+}
 
+func parseLines(out string) []string {
 	var res []string
 	for line := range strings.Lines(out) {
 		if p := strings.TrimSpace(line); p != "" {
@@ -147,7 +153,7 @@ func (m *Manager) ProjectList() ([]string, error) {
 		}
 	}
 	slices.Sort(res)
-	return slices.Compact(res), nil
+	return slices.Compact(res)
 }
 
 func projectEnv(project string) []string {
