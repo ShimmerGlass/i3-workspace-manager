@@ -64,12 +64,18 @@ func (m *Manager) ActionDaemon() error {
 }
 
 func (m *Manager) ActionOpenProject(project string) error {
-	projects, err := m.ProjectList()
+	open, err := m.OpenProjects()
 	if err != nil {
 		return err
 	}
-	if !slices.Contains(projects, project) {
-		return fmt.Errorf("unknown project %q", project)
+	if !slices.Contains(open, project) {
+		projects, err := m.ProjectList()
+		if err != nil {
+			return err
+		}
+		if !slices.Contains(projects, project) {
+			return fmt.Errorf("unknown project %q", project)
+		}
 	}
 
 	hist, err := history.Get()
