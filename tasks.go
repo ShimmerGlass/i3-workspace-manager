@@ -95,7 +95,7 @@ func (m *Manager) ActionDone() error {
 		return err
 	}
 	if project == allMergedChoice {
-		return m.doneAllMerged(hist, tasks)
+		return m.doneAllMerged(hist, tasks, true)
 	}
 
 	out, err := runShell(m.DoneCommand, doneEnv(project, "check"))
@@ -116,9 +116,30 @@ func (m *Manager) ActionDone() error {
 	return nil
 }
 
+func (m *Manager) ActionDoneMerged() error {
+	if m.DoneCommand == "" || m.DoneListCommand == "" {
+		return errors.New("-done-cmd and -done-list-cmd are required")
+	}
+
+	tasks, err := listProjects(m.DoneListCommand)
+	if err != nil {
+		return err
+	}
+	if len(tasks) == 0 {
+		notify("i3wks", "No task to mark done")
+		return nil
+	}
+
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+	return m.doneAllMerged(hist, tasks, false)
+}
+
 const allMergedChoice = "✗ all merged tasks"
 
-func (m *Manager) doneAllMerged(hist *history.History, tasks []string) error {
+func (m *Manager) doneAllMerged(hist *history.History, tasks []string, confirm bool) error {
 	safe := make([]bool, len(tasks))
 	var wg sync.WaitGroup
 	for i, task := range tasks {
@@ -144,15 +165,17 @@ func (m *Manager) doneAllMerged(hist *history.History, tasks []string) error {
 		return nil
 	}
 
-	ok, err := sel.Confirm(fmt.Sprintf("Delete %d merged task(s)?\n\n%s", len(merged), strings.Join(merged, "\n")))
-	if err != nil || !ok {
-		return err
+	if confirm {
+		ok, err := sel.Confirm(fmt.Sprintf("Delete %d merged task(s)?\n\n%s", len(merged), strings.Join(merged, "\n")))
+		if err != nil || !ok {
+			return err
+		}
 	}
 
 	if err := m.removeTasks(hist, merged); err != nil {
 		return err
 	}
-	notify("i3wks", fmt.Sprintf("%d merged task(s) deleted", len(merged)))
+	notify("i3wks", fmt.Sprintf("%d merged task(s) deleted\n\n%s", len(merged), strings.Join(merged, "\n")))
 	return nil
 }
 
