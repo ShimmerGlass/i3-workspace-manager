@@ -77,6 +77,8 @@ func run() error {
 	modeClose := flag.Bool("close", false, "close projects")
 	modeNew := flag.Bool("new", false, "create a task project and open it")
 	modeDone := flag.Bool("done", false, "close a task project and remove it")
+	modeDoneTask := flag.String("done-task", "", "close the named task project and remove it, without the selector; refuses when the check warns unless -force")
+	force := flag.Bool("force", false, "with -done-task, remove the task even when the check warns")
 	modeDoneMerged := flag.Bool("done-merged", false, "close and remove every task whose PR is merged, without asking")
 	modeDaemon := flag.Bool("daemon", false, "keep project workspaces pinned to their display")
 	flag.Parse()
@@ -120,11 +122,13 @@ func run() error {
 		return m.ActionNew()
 	case *modeDone:
 		return m.ActionDone()
+	case *modeDoneTask != "":
+		return m.ActionDoneTask(*modeDoneTask, *force)
 	case *modeDoneMerged:
 		return m.ActionDoneMerged()
 	case *modeDaemon:
 		return m.ActionDaemon()
 	default:
-		return errors.New("specify one of -project, -open, -select, -prev, -next, -close, -new, -done, -done-merged, -daemon")
+		return errors.New("specify one of -project, -open, -select, -prev, -next, -close, -new, -done, -done-task, -done-merged, -daemon")
 	}
 }

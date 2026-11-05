@@ -116,6 +116,38 @@ func (m *Manager) ActionDone() error {
 	return nil
 }
 
+func (m *Manager) ActionDoneTask(project string, force bool) error {
+	if m.DoneCommand == "" || m.DoneListCommand == "" {
+		return errors.New("-done-cmd and -done-list-cmd are required")
+	}
+
+	tasks, err := listProjects(m.DoneListCommand)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(tasks, project) {
+		return fmt.Errorf("%s is not a task listed by -done-list-cmd", project)
+	}
+
+	out, err := runShell(m.DoneCommand, doneEnv(project, "check"))
+	if err != nil {
+		return fmt.Errorf("checking task %s: %w", project, err)
+	}
+	if warn := strings.TrimSpace(out); warn != "" && !force {
+		return fmt.Errorf("%s\nnot deleting %s, pass -force to delete it anyway", warn, project)
+	}
+
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+	if err := m.removeTasks(hist, []string{project}); err != nil {
+		return err
+	}
+	notify("i3wks", fmt.Sprintf("Task %s done", project))
+	return nil
+}
+
 func (m *Manager) ActionDoneMerged() error {
 	if m.DoneCommand == "" || m.DoneListCommand == "" {
 		return errors.New("-done-cmd and -done-list-cmd are required")
@@ -202,6 +234,11 @@ func (m *Manager) removeTasks(hist *history.History, projects []string) error {
 		hist.Remove(project)
 	}
 
+	if projects, err := m.ProjectList(); err != nil {
+		log.Printf("pruning history: %s", err)
+	} else if len(projects) > 0 {
+		hist.Retain(projects)
+	}
 	if err := history.Write(hist); err != nil {
 		log.Printf("writing history: %s", err)
 	}

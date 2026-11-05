@@ -27,6 +27,15 @@ func (h *History) Remove(p string) {
 	h.Projects = slices.DeleteFunc(h.Projects, func(x string) bool { return x == p })
 }
 
+func (h *History) Retain(keep []string) {
+	var current string
+	if h.Position >= 0 && h.Position < len(h.Projects) {
+		current = h.Projects[h.Position]
+	}
+	h.Projects = slices.DeleteFunc(h.Projects, func(x string) bool { return !slices.Contains(keep, x) })
+	h.Position = max(slices.Index(h.Projects, current), 0)
+}
+
 func (h *History) Add(p string) {
 	h.Remove(p)
 	h.Projects = slices.Insert(h.Projects, 0, p)

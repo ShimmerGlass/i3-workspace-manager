@@ -48,3 +48,16 @@ func TestSort(t *testing.T) {
 		t.Fatalf("got %v, want %v", s, want)
 	}
 }
+
+func TestRetain(t *testing.T) {
+	h := &History{Position: 2, Projects: []string{"gone", "a", "b", "gone2", "c"}}
+	h.Retain([]string{"a", "b", "c"})
+	if h.Position != 1 || !slices.Equal(h.Projects, []string{"a", "b", "c"}) {
+		t.Fatalf("got %+v", h)
+	}
+	h = &History{Position: 1, Projects: []string{"a", "gone"}}
+	h.Retain([]string{"a"})
+	if h.Position != 0 || !slices.Equal(h.Projects, []string{"a"}) {
+		t.Fatalf("got %+v", h)
+	}
+}
