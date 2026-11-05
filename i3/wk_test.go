@@ -41,6 +41,7 @@ func TestTreeWorkspaceHasWindows(t *testing.T) {
 		{"floating view", workspace("w", nil, []*Node{floatingView()}), true},
 		{"view in floating split", workspace("w", nil, []*Node{{Type: sway.NodeFloatingCon, Nodes: []*Node{view()}}}), true},
 		{"empty splits", workspace("w", []*Node{split(), split()}, nil), false},
+		{"sticky floating view", workspace("w", nil, []*Node{{Type: sway.NodeFloatingCon, Sticky: true, PID: floatingView().PID}}), false},
 	}
 	for _, tt := range tests {
 		if got := TreeWorkspaceHasWindows(tt.tree, "w"); got != tt.want {

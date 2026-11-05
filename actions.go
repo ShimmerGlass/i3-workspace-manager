@@ -265,7 +265,7 @@ func (m *Manager) closeWorkspace(wk i3.Workspace) error {
 	}
 	defer stop()
 
-	if err := i3.CloseWorkspace(m.sw, wk.Num); err != nil {
+	if err := i3.CloseWorkspace(m.sw, wk.Name); err != nil {
 		return err
 	}
 
