@@ -2,8 +2,10 @@ package i3
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"os/exec"
 	"slices"
 	"strings"
 
@@ -55,12 +57,57 @@ func CloseWorkspace(sw Client, name string) error {
 	if err != nil {
 		return err
 	}
-	for _, v := range TreeWorkspaceViews(tree, name) {
-		if err := run(sw, "[con_id=%d] kill", v.ID); err != nil {
+	views := TreeWorkspaceViews(tree, name)
+	var scratch map[int64]bool
+	if slices.ContainsFunc(views, func(v *Node) bool { return v.Type == sway.NodeFloatingCon }) {
+		if scratch, err = scratchpadIDs(); err != nil {
+			return err
+		}
+	}
+	for _, v := range views {
+		action := "kill"
+		if v.Sticky || scratch[v.ID] {
+			action = "move scratchpad"
+		}
+		if err := run(sw, "[con_id=%d] %s", v.ID, action); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+type rawNode struct {
+	ID              int64     `json:"id"`
+	ScratchpadState string    `json:"scratchpad_state"`
+	Nodes           []rawNode `json:"nodes"`
+	FloatingNodes   []rawNode `json:"floating_nodes"`
+}
+
+func scratchpadIDs() (map[int64]bool, error) {
+	out, err := exec.Command("swaymsg", "-r", "-t", "get_tree").Output()
+	if err != nil {
+		return nil, fmt.Errorf("swaymsg get_tree: %w", err)
+	}
+	return parseScratchpadIDs(out)
+}
+
+func parseScratchpadIDs(data []byte) (map[int64]bool, error) {
+	var root rawNode
+	if err := json.Unmarshal(data, &root); err != nil {
+		return nil, err
+	}
+	ids := map[int64]bool{}
+	var walk func(n rawNode)
+	walk = func(n rawNode) {
+		if n.ScratchpadState != "" && n.ScratchpadState != "none" {
+			ids[n.ID] = true
+		}
+		for _, c := range slices.Concat(n.Nodes, n.FloatingNodes) {
+			walk(c)
+		}
+	}
+	walk(root)
+	return ids, nil
 }
 
 func MoveCurrentWorkspace(sw Client, output string) error {
@@ -80,7 +127,7 @@ func WorkspaceHasWindows(sw Client, name string) (bool, error) {
 }
 
 func TreeWorkspaceHasWindows(tree *Node, name string) bool {
-	return len(TreeWorkspaceViews(tree, name)) > 0
+	return slices.ContainsFunc(TreeWorkspaceViews(tree, name), func(v *Node) bool { return !v.Sticky })
 }
 
 func TreeWorkspaceViews(tree *Node, name string) []*Node {
@@ -93,9 +140,6 @@ func TreeWorkspaceViews(tree *Node, name string) []*Node {
 	var views []*Node
 	var walk func(n *Node)
 	walk = func(n *Node) {
-		if n.Sticky {
-			return
-		}
 		if isView(n) {
 			views = append(views, n)
 			return

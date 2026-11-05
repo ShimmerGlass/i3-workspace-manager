@@ -53,6 +53,29 @@ func TestTreeWorkspaceHasWindows(t *testing.T) {
 	}
 }
 
+func TestTreeWorkspaceViewsKeepsSticky(t *testing.T) {
+	sticky := floatingView()
+	sticky.Sticky = true
+	tree := workspace("w", []*Node{view()}, []*Node{sticky})
+	if got := len(TreeWorkspaceViews(tree, "w")); got != 2 {
+		t.Errorf("got %d views, want 2", got)
+	}
+}
+
+func TestParseScratchpadIDs(t *testing.T) {
+	data := []byte(`{"id":1,"scratchpad_state":"none","nodes":[{"id":2,"nodes":[{"id":3,"scratchpad_state":"none"}],"floating_nodes":[{"id":4,"scratchpad_state":"fresh"},{"id":5,"scratchpad_state":"changed"},{"id":6,"scratchpad_state":"none"}]}]}`)
+	ids, err := parseScratchpadIDs(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 2 || !ids[4] || !ids[5] {
+		t.Errorf("got %v, want 4 and 5", ids)
+	}
+	if _, err := parseScratchpadIDs([]byte("nope")); err == nil {
+		t.Error("bad json accepted")
+	}
+}
+
 func TestQuote(t *testing.T) {
 	if got, want := Quote(`a "b" \c`), `"a \"b\" \\c"`; got != want {
 		t.Fatalf("got %s, want %s", got, want)
