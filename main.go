@@ -18,6 +18,7 @@ type Manager struct {
 	sw         sway.Client
 	nextWksNum int64
 
+	Background      bool
 	Workspaces      []WorkspaceConfig
 	SetupCommand    string
 	ListCommand     string
@@ -81,6 +82,7 @@ func run() error {
 	force := flag.Bool("force", false, "with -done-task, remove the task even when the check warns")
 	modeDoneMerged := flag.Bool("done-merged", false, "close and remove every task whose PR is merged, without asking")
 	modeDaemon := flag.Bool("daemon", false, "keep project workspaces pinned to their display")
+	background := flag.Bool("background", false, "with -project/-open/-select/-new, open without switching workspaces or focus")
 	flag.Parse()
 
 	wks, err := parseWorkspaces(workspaces)
@@ -95,6 +97,7 @@ func run() error {
 
 	m := &Manager{
 		sw:              sw,
+		Background:      *background,
 		Workspaces:      wks,
 		SetupCommand:    *setupCommand,
 		ListCommand:     *listCommand,

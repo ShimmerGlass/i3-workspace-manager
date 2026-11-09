@@ -61,3 +61,34 @@ func TestRetain(t *testing.T) {
 		t.Fatalf("got %+v", h)
 	}
 }
+
+func TestAddBackground(t *testing.T) {
+	tests := []struct {
+		name     string
+		h        History
+		p        string
+		wantPos  int
+		wantList []string
+	}{
+		{"empty", History{}, "x", 0, []string{"x"}},
+		{"absent", History{Position: 1, Projects: []string{"a", "b", "c"}}, "x", 2, []string{"x", "a", "b", "c"}},
+		{"absent at head", History{Projects: []string{"a", "b"}}, "x", 1, []string{"x", "a", "b"}},
+		{"present after current", History{Position: 1, Projects: []string{"a", "b", "c"}}, "c", 2, []string{"c", "a", "b"}},
+		{"present before current", History{Position: 2, Projects: []string{"a", "b", "c"}}, "b", 2, []string{"b", "a", "c"}},
+		{"present at head before current", History{Position: 1, Projects: []string{"a", "b"}}, "a", 1, []string{"a", "b"}},
+		{"is current", History{Position: 2, Projects: []string{"a", "b", "c"}}, "c", 0, []string{"c", "a", "b"}},
+	}
+	for _, tt := range tests {
+		var current string
+		if tt.h.Position < len(tt.h.Projects) {
+			current = tt.h.Projects[tt.h.Position]
+		}
+		tt.h.AddBackground(tt.p)
+		if tt.h.Position != tt.wantPos || !slices.Equal(tt.h.Projects, tt.wantList) {
+			t.Errorf("%s: got %+v, want %d %v", tt.name, tt.h, tt.wantPos, tt.wantList)
+		}
+		if current != "" && current != tt.p && tt.h.Projects[tt.h.Position] != current {
+			t.Errorf("%s: current project changed to %s", tt.name, tt.h.Projects[tt.h.Position])
+		}
+	}
+}

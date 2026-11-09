@@ -7,9 +7,9 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/shimmerglass/i3-workspace-manager/i3"
@@ -38,24 +38,24 @@ func (m *Manager) OpenProject(project string) error {
 	for _, cfg := range m.Workspaces {
 		wk, ok := findProjectWks(wks, project, cfg.Display)
 		if !ok {
-			name, err := m.createProjectWks(project, cfg)
+			name, output, err := m.newProjectWks(project, cfg)
 			if err != nil {
 				return err
 			}
-			if err := m.spawnWindow(project, cfg, name); err != nil {
+			if err := m.spawnWindow(project, cfg, name, output, output); err != nil {
 				return err
 			}
 			continue
 		}
 
-		hasWindows := i3.TreeWorkspaceHasWindows(tree, wk.Name)
-		if !wk.Visible || !hasWindows {
-			if err := i3.SwitchToWorkspace(m.sw, wk.Name); err != nil {
+		if !i3.TreeWorkspaceHasWindows(tree, wk.Name) {
+			if err := m.spawnWindow(project, cfg, wk.Name, "", wk.Output); err != nil {
 				return err
 			}
+			continue
 		}
-		if !hasWindows {
-			if err := m.spawnWindow(project, cfg, wk.Name); err != nil {
+		if !m.Background && !wk.Visible {
+			if err := i3.SwitchToWorkspace(m.sw, wk.Name); err != nil {
 				return err
 			}
 		}
@@ -64,55 +64,92 @@ func (m *Manager) OpenProject(project string) error {
 	return nil
 }
 
-func (m *Manager) createProjectWks(project string, cfg WorkspaceConfig) (string, error) {
+func (m *Manager) newProjectWks(project string, cfg WorkspaceConfig) (string, string, error) {
 	num, err := m.nextWorkspaceNum()
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	label, err := m.workspaceLabel(project)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	name := formatWorkspaceName(num, label, wksInfo{Project: project, Display: cfg.Display})
 
 	output, err := m.resolveOutput(cfg.Display)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	if output != "" {
-		if err := i3.AssignWorkspace(m.sw, name, output); err != nil {
-			return "", err
-		}
-	}
-
-	if err := i3.SwitchToWorkspace(m.sw, name); err != nil {
-		return "", err
-	}
-	return name, nil
+	return name, output, nil
 }
 
-func (m *Manager) spawnWindow(project string, cfg WorkspaceConfig, wksName string) error {
+func (m *Manager) spawnWindow(project string, cfg WorkspaceConfig, wksName, assignOutput, wksOutput string) error {
+	var restore []string
+	if m.Background {
+		current, err := i3.Workspaces(m.sw)
+		if err != nil {
+			return err
+		}
+		restore = restoreTargets(current, wksOutput)
+	}
+
+	command, err := buildSpawnCommand(wksName, assignOutput, project, cfg.Command, restore)
+	if err != nil {
+		return err
+	}
+
 	events, stop, err := i3.WinEvents()
 	if err != nil {
 		return err
 	}
 	defer stop()
 
-	if err := spawn(cfg.Command, projectEnv(project)); err != nil {
+	if err := i3.RunCommand(m.sw, command); err != nil {
 		return err
 	}
 
+	var strays []int64
 	timeout := time.After(winSpawnTimeout)
 	for {
 		select {
 		case ev := <-events:
-			if i3.IsNewTiledWindow(ev) {
-				return i3.MoveContainerToWorkspace(m.sw, ev.Container.ID, wksName)
+			if !i3.IsNewTiledWindow(ev) {
+				continue
+			}
+			tree, err := i3.Tree(m.sw)
+			if err != nil {
+				return err
+			}
+			if name, ok := i3.ContainerWorkspace(tree, ev.Container.ID); ok && name == wksName {
+				if !m.Background {
+					return nil
+				}
+				return m.wakeIfStuck(ev.Container.ID, wksName, wksOutput)
+			}
+			strays = append(strays, ev.Container.ID)
+			if id, ok := projectWindow(tree, strays, project); ok {
+				return i3.MoveContainerToWorkspace(m.sw, id, wksName)
 			}
 		case <-timeout:
-			return fmt.Errorf("command %q did not spawn any new window after %s", cfg.Command, winSpawnTimeout)
+			tree, err := i3.Tree(m.sw)
+			if err != nil {
+				return err
+			}
+			if id, ok := projectWindow(tree, strays, project); ok {
+				return i3.MoveContainerToWorkspace(m.sw, id, wksName)
+			}
+			return fmt.Errorf("command %q did not open a window on workspace %s after %s, it may have opened elsewhere", cfg.Command, wksName, winSpawnTimeout)
 		}
 	}
+}
+
+func projectWindow(tree *i3.Node, ids []int64, project string) (int64, bool) {
+	base := path.Base(project)
+	for _, id := range ids {
+		if n := i3.FindContainer(tree, id); n != nil && strings.Contains(n.Name, base) {
+			return id, true
+		}
+	}
+	return 0, false
 }
 
 func (m *Manager) workspaceLabel(project string) (string, error) {
@@ -158,16 +195,6 @@ func parseLines(out string) []string {
 
 func projectEnv(project string) []string {
 	return append(os.Environ(), "PROJECT_NAME="+project)
-}
-
-func spawn(command string, env []string) error {
-	cmd := exec.Command("/bin/sh", "-c", command)
-	cmd.Env = env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting %q: %w", command, err)
-	}
-	return cmd.Process.Release()
 }
 
 func runShell(command string, env []string) (string, error) {

@@ -81,3 +81,21 @@ func TestQuote(t *testing.T) {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
+
+func TestContainerWorkspace(t *testing.T) {
+	v := view()
+	v.ID = 7
+	f := floatingView()
+	f.ID = 8
+	tree := workspace("w", []*Node{{Type: sway.NodeCon, Nodes: []*Node{v}}}, []*Node{f})
+	tree.Nodes[0].Nodes = append(tree.Nodes[0].Nodes, &Node{Type: sway.NodeWorkspace, Name: "other", Nodes: []*Node{func() *Node { n := view(); n.ID = 9; return n }()}})
+
+	for id, want := range map[int64]string{7: "w", 8: "w", 9: "other"} {
+		if got, ok := ContainerWorkspace(tree, id); !ok || got != want {
+			t.Errorf("id %d: got %q %v, want %q", id, got, ok, want)
+		}
+	}
+	if _, ok := ContainerWorkspace(tree, 99); ok {
+		t.Error("unknown container found")
+	}
+}

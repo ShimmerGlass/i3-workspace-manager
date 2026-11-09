@@ -42,6 +42,21 @@ func (h *History) Add(p string) {
 	h.Position = 0
 }
 
+func (h *History) AddBackground(p string) {
+	if h.Position < 0 || h.Position >= len(h.Projects) || h.Projects[h.Position] == p {
+		h.Add(p)
+		return
+	}
+	if i := slices.Index(h.Projects, p); i >= 0 {
+		h.Projects = slices.Delete(h.Projects, i, i+1)
+		if i < h.Position {
+			h.Position--
+		}
+	}
+	h.Projects = slices.Insert(h.Projects, 0, p)
+	h.Position++
+}
+
 func (h *History) Sort(s []string) {
 	idx := make(map[string]int, len(h.Projects))
 	for i, p := range h.Projects {

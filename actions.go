@@ -235,7 +235,11 @@ func (m *Manager) openAndRecord(hist *history.History, project string) error {
 	if err := m.OpenProject(project); err != nil {
 		return err
 	}
-	hist.Add(project)
+	if m.Background {
+		hist.AddBackground(project)
+	} else {
+		hist.Add(project)
+	}
 	return history.Write(hist)
 }
 

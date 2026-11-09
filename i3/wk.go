@@ -44,6 +44,45 @@ func run(sw Client, format string, args ...any) error {
 	return err
 }
 
+func RunCommand(sw Client, cmd string) error {
+	return run(sw, "%s", cmd)
+}
+
+func FindContainer(tree *Node, conID int64) *Node {
+	if tree.ID == conID {
+		return tree
+	}
+	for _, c := range slices.Concat(tree.Nodes, tree.FloatingNodes) {
+		if n := FindContainer(c, conID); n != nil {
+			return n
+		}
+	}
+	return nil
+}
+
+func ContainerWorkspace(tree *Node, conID int64) (string, bool) {
+	var found string
+	var ok bool
+	var walk func(n *Node, wks string)
+	walk = func(n *Node, wks string) {
+		if n.Type == sway.NodeWorkspace {
+			wks = n.Name
+		}
+		if n.ID == conID && n.PID != nil {
+			found, ok = wks, true
+			return
+		}
+		for _, c := range slices.Concat(n.Nodes, n.FloatingNodes) {
+			if ok {
+				return
+			}
+			walk(c, wks)
+		}
+	}
+	walk(tree, "")
+	return found, ok
+}
+
 func SwitchToWorkspace(sw Client, name string) error {
 	return run(sw, "workspace %s", Quote(name))
 }
