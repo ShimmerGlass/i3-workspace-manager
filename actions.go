@@ -211,6 +211,47 @@ func (m *Manager) ActionClose() error {
 	return nil
 }
 
+func (m *Manager) ActionCloseProject(project string) error {
+	open, err := m.OpenProjects()
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(open, project) {
+		return fmt.Errorf("project %q is not open", project)
+	}
+	hist, err := history.Get()
+	if err != nil {
+		return err
+	}
+	current, _, err := m.CurrentProject()
+	if err != nil {
+		return err
+	}
+	wks, err := m.managedWorkspaces()
+	if err != nil {
+		return err
+	}
+	if err := m.closeProject(wks, project); err != nil {
+		return err
+	}
+	notify("i3wks", fmt.Sprintf("Closed project %s", project))
+	if project == current {
+		return m.returnToRecent(hist)
+	}
+	return nil
+}
+
+func (m *Manager) ActionListOpen() error {
+	open, err := m.OpenProjects()
+	if err != nil {
+		return err
+	}
+	for _, p := range open {
+		fmt.Println(p)
+	}
+	return nil
+}
+
 func (m *Manager) returnToRecent(hist *history.History) error {
 	open, err := m.OpenProjects()
 	if err != nil {

@@ -15,6 +15,8 @@ The following commands are available :
 | `-prev / -next` | quick switch to previous / next project              |
 | `-close`        | close project windows and switch to previous project |
 | `-project NAME` | open the named project, without the selector         |
+| `-close-project NAME` | close the named project, without the selector  |
+| `-list-open`    | print the open projects, one per line                |
 | `-daemon`       | keep project workspaces pinned to their display (sway) |
 
 ## Project list

@@ -76,6 +76,8 @@ func run() error {
 	modePrev := flag.Bool("prev", false, "switch to the previous project")
 	modeNext := flag.Bool("next", false, "switch to the next project")
 	modeClose := flag.Bool("close", false, "close projects")
+	modeCloseProject := flag.String("close-project", "", "close the named project, without the selector")
+	modeListOpen := flag.Bool("list-open", false, "print the open projects, one per line")
 	modeNew := flag.Bool("new", false, "create a task project and open it")
 	modeDone := flag.Bool("done", false, "close a task project and remove it")
 	modeDoneTask := flag.String("done-task", "", "close the named task project and remove it, without the selector; refuses when the check warns unless -force")
@@ -121,6 +123,10 @@ func run() error {
 		return m.ActionHistoryGo(-1)
 	case *modeClose:
 		return m.ActionClose()
+	case *modeCloseProject != "":
+		return m.ActionCloseProject(*modeCloseProject)
+	case *modeListOpen:
+		return m.ActionListOpen()
 	case *modeNew:
 		return m.ActionNew()
 	case *modeDone:
@@ -132,6 +138,6 @@ func run() error {
 	case *modeDaemon:
 		return m.ActionDaemon()
 	default:
-		return errors.New("specify one of -project, -open, -select, -prev, -next, -close, -new, -done, -done-task, -done-merged, -daemon")
+		return errors.New("specify one of -project, -open, -select, -prev, -next, -close, -close-project, -list-open, -new, -done, -done-task, -done-merged, -daemon")
 	}
 }
